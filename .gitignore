@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Models — too large for git, downloaded via script
+models/
+*.gguf
+*.bin
+
+# Environment
+.env
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# GitHub Actions runner
+actions-runner/

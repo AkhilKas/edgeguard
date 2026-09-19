@@ -1,0 +1,47 @@
+name: CD — Deploy to UNO Q
+
+on:
+  push:
+    branches: [main]
+
+# Only one deployment can run at a time
+concurrency:
+  group: deploy-uno-q
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to device
+    # This job runs ON the UNO Q itself via a self-hosted runner.
+    # See scripts/setup_runner.sh for how to register it.
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull latest code
+        run: git pull origin main
+
+      - name: Install / update dependencies
+        run: pip install -e ".[dev]" --quiet
+
+      - name: Run on-device unit tests
+        env:
+          MCU_ENABLED: "false"
+        run: pytest tests/unit/ -v --no-cov
+
+      - name: Restart EdgeGuard service
+        run: |
+          sudo systemctl restart edgeguard
+          sleep 3
+          sudo systemctl is-active --quiet edgeguard
+          echo "EdgeGuard service is running"
+
+      - name: Smoke test
+        run: |
+          curl -sf http://localhost:8000/health | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data['status'] == 'ok', f'Health check failed: {data}'
+          print('Health check passed:', data)
+          "
