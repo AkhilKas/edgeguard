@@ -7,6 +7,7 @@ Reads from environment variables or a .env file.
 from enum import Enum
 from pathlib import Path
 
+from arduino.router_bridge import DEFAULT_ADDRESS
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -87,9 +88,11 @@ class MCUSettings(BaseSettings):
         env_ignore_empty=True,
     )
 
-    port: str = Field(default="/dev/ttyACM0", description="UART serial port")
-    baud_rate: int = Field(default=115200)
-    timeout: float = Field(default=2.0, description="Serial read timeout in seconds")
+    address: str = Field(
+        default=DEFAULT_ADDRESS,
+        description="Arduino Router Bridge address (unix://<path> or tcp://<host>:<port>)",
+    )
+    timeout: float = Field(default=5.0, description="Bridge connect timeout in seconds")
     enabled: bool = Field(
         default=True,
         description="Set False in CI/CD or local dev without hardware",

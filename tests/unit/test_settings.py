@@ -47,7 +47,7 @@ def test_mcu_settings_can_be_disabled() -> None:
     settings = MCUSettings(enabled=False)
 
     assert settings.enabled is False
-    assert settings.port == "/dev/ttyACM0"
+    assert settings.address == "unix:///var/run/arduino-router.sock"
 
 
 def test_api_settings_rejects_privileged_port() -> None:
