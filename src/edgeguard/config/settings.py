@@ -38,10 +38,36 @@ class LLMSettings(BaseSettings):
         description="Path to the GGUF model file",
     )
     context_window: int = Field(default=2048, ge=512, le=8192)
-    max_tokens: int = Field(default=512, ge=64, le=2048)
+    max_tokens: int = Field(
+        default=128,
+        ge=64,
+        le=2048,
+        description="Hard ceiling on generation length; bounds worst-case latency "
+        "if the model derails instead of naturally stopping",
+    )
     n_threads: int = Field(default=4, ge=1, le=8)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    stop_tokens: list[str] = Field(default=["</s>", "<|endoftext|>"])
+    repeat_penalty: float = Field(
+        default=1.3,
+        ge=1.0,
+        le=2.0,
+        description="Penalize repeated tokens to avoid loops",
+    )
+    stop_tokens: list[str] = Field(
+        default=["<|im_end|>", "<think>", "</s>", "<|endoftext|>"],
+        description=(
+            "'<think>' is included because this model family reopens a reasoning "
+            "block mid-generation even when the chat template pre-fills an empty "
+            "one; stopping there keeps responses short and bounded."
+        ),
+    )
+    system_prompt: str = Field(
+        default=(
+            "You are EdgeGuard, a concise assistant for a smart home device. "
+            "Respond in one short sentence."
+        ),
+        description="System prompt prepended to every chat completion",
+    )
 
     @field_validator("model_path")
     @classmethod

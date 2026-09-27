@@ -59,8 +59,10 @@ def test_load_is_idempotent(llm_settings: LLMSettings, mocker) -> None:
 
 def test_generate_returns_inference_result(llm_settings: LLMSettings, mocker) -> None:
     mock_model = mocker.MagicMock()
-    mock_model.return_value = {
-        "choices": [{"text": "  a helpful reply  "}],
+    mock_model.create_chat_completion.return_value = {
+        "choices": [
+            {"message": {"role": "assistant", "content": "  a helpful reply  "}}
+        ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 3},
     }
     mocker.patch("edgeguard.llm.engine.Llama", return_value=mock_model)
@@ -69,12 +71,15 @@ def test_generate_returns_inference_result(llm_settings: LLMSettings, mocker) ->
 
     result = engine.generate("hello there")
 
-    mock_model.assert_called_once_with(
-        "hello there",
+    mock_model.create_chat_completion.assert_called_once_with(
+        messages=[
+            {"role": "system", "content": llm_settings.system_prompt},
+            {"role": "user", "content": "hello there"},
+        ],
         max_tokens=llm_settings.max_tokens,
         temperature=llm_settings.temperature,
+        repeat_penalty=llm_settings.repeat_penalty,
         stop=llm_settings.stop_tokens,
-        echo=False,
     )
     assert result.text == "a helpful reply"
     assert result.prompt_tokens == 5
@@ -86,7 +91,9 @@ def test_generate_defaults_usage_when_missing(
     llm_settings: LLMSettings, mocker
 ) -> None:
     mock_model = mocker.MagicMock()
-    mock_model.return_value = {"choices": [{"text": "reply"}]}
+    mock_model.create_chat_completion.return_value = {
+        "choices": [{"message": {"role": "assistant", "content": "reply"}}]
+    }
     mocker.patch("edgeguard.llm.engine.Llama", return_value=mock_model)
     engine = LlamaCppEngine(llm_settings)
     engine.load()
@@ -95,6 +102,20 @@ def test_generate_defaults_usage_when_missing(
 
     assert result.prompt_tokens == 0
     assert result.completion_tokens == 0
+
+
+def test_generate_handles_none_content(llm_settings: LLMSettings, mocker) -> None:
+    mock_model = mocker.MagicMock()
+    mock_model.create_chat_completion.return_value = {
+        "choices": [{"message": {"role": "assistant", "content": None}}]
+    }
+    mocker.patch("edgeguard.llm.engine.Llama", return_value=mock_model)
+    engine = LlamaCppEngine(llm_settings)
+    engine.load()
+
+    result = engine.generate("hi")
+
+    assert result.text == ""
 
 
 def test_unload_releases_model(llm_settings: LLMSettings, mocker) -> None:
