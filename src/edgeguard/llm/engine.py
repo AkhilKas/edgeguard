@@ -45,14 +45,17 @@ class LlamaCppEngine(BaseLLM):
             raise RuntimeError("Call load() before generate()")
 
         log.debug("llm.inference_start", prompt_len=len(prompt))
-        output = self._model(
-            prompt,
+        output = self._model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": self._settings.system_prompt},
+                {"role": "user", "content": prompt},
+            ],
             max_tokens=self._settings.max_tokens,
             temperature=self._settings.temperature,
+            repeat_penalty=self._settings.repeat_penalty,
             stop=self._settings.stop_tokens,
-            echo=False,
         )
-        text: str = output["choices"][0]["text"].strip()
+        text: str = (output["choices"][0]["message"]["content"] or "").strip()
         usage = output.get("usage", {})
 
         log.debug("llm.inference_done", output_len=len(text))
