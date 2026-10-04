@@ -19,6 +19,9 @@ models/
 # Environment
 .env
 
+# Local dev log, not shared
+CHANGES.md
+
 # Coverage
 .coverage
 htmlcov/
