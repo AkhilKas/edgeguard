@@ -66,6 +66,9 @@ src/edgeguard/
   pipeline/    orchestrates guardrail -> LLM per request
   api/         FastAPI app (routes, schemas, startup/shutdown wiring)
   config/      all tunable settings, read from environment / .env
+  training/    notebook(s) for training the ML guardrail classifier
+               (not imported by the app; run in Colab/Jupyter, exported
+               model artifacts are deployed separately, not committed)
 ```
 
 ## Quickstart
