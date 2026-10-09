@@ -17,8 +17,13 @@ def build_classifier(settings: GuardrailSettings) -> BaseClassifier:
     if settings.mode == GuardrailMode.ML:
         if settings.model_path is None:
             raise ValueError("GUARDRAIL_MODEL_PATH must be set when GUARDRAIL_MODE=ml")
+        if settings.tokenizer_path is None:
+            raise ValueError(
+                "GUARDRAIL_TOKENIZER_PATH must be set when GUARDRAIL_MODE=ml"
+            )
         return MLClassifier(
             model_path=settings.model_path,
+            tokenizer_path=settings.tokenizer_path,
             threshold=settings.confidence_threshold,
         )
 

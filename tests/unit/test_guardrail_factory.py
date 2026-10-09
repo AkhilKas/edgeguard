@@ -19,22 +19,41 @@ def test_heuristic_mode_returns_heuristic_classifier() -> None:
 
 
 def test_ml_mode_without_model_path_raises() -> None:
-    settings = GuardrailSettings(mode=GuardrailMode.ML, model_path=None)
+    settings = GuardrailSettings(
+        mode=GuardrailMode.ML, model_path=None, tokenizer_path=Path("tokenizer.json")
+    )
 
     with pytest.raises(ValueError, match="GUARDRAIL_MODEL_PATH must be set"):
         build_classifier(settings)
 
 
+def test_ml_mode_without_tokenizer_path_raises(tmp_path: Path) -> None:
+    settings = GuardrailSettings(
+        mode=GuardrailMode.ML,
+        model_path=tmp_path / "classifier.onnx",
+        tokenizer_path=None,
+    )
+
+    with pytest.raises(ValueError, match="GUARDRAIL_TOKENIZER_PATH must be set"):
+        build_classifier(settings)
+
+
 def test_ml_mode_constructs_ml_classifier(tmp_path: Path, mocker) -> None:
-    model_path = tmp_path / "classifier.joblib"
+    model_path = tmp_path / "classifier.onnx"
+    tokenizer_path = tmp_path / "tokenizer.json"
     mock_ml_classifier = mocker.patch("edgeguard.guardrail.factory.MLClassifier")
     settings = GuardrailSettings(
-        mode=GuardrailMode.ML, model_path=model_path, confidence_threshold=0.6
+        mode=GuardrailMode.ML,
+        model_path=model_path,
+        tokenizer_path=tokenizer_path,
+        confidence_threshold=0.6,
     )
 
     build_classifier(settings)
 
-    mock_ml_classifier.assert_called_once_with(model_path=model_path, threshold=0.6)
+    mock_ml_classifier.assert_called_once_with(
+        model_path=model_path, tokenizer_path=tokenizer_path, threshold=0.6
+    )
 
 
 def test_unknown_mode_raises() -> None:

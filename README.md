@@ -110,7 +110,11 @@ bash scripts/setup_runner.sh    # registers a self-hosted GitHub Actions runner
 ## Status
 
 - Heuristic guardrail: implemented and tested.
-- ML guardrail mode: interface in place, distillation/training not done yet.
+- ML guardrail mode: implemented (ONNX Runtime + tokenizers, see
+  `guardrail/ml_classifier.py`) and unit tested against mocks, but not yet
+  tested against real trained weights — the training notebook hasn't been
+  run end-to-end and no `.onnx`/`tokenizer.json` artifacts exist in the repo
+  yet. Set `GUARDRAIL_MODEL_PATH` and `GUARDRAIL_TOKENIZER_PATH` once they do.
 - MCU integration: Linux-side Router Bridge wrapper implemented; the
   corresponding MCU sketch (calling `Bridge.call("on_prompt", ...)` and
   providing `set_status`) is not written yet.

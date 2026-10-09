@@ -90,11 +90,16 @@ class GuardrailSettings(BaseSettings):
 
     mode: GuardrailMode = Field(
         default=GuardrailMode.HEURISTIC,
-        description="Switch to 'ml' after Week 4 distillation",
+        description="Switch to 'ml' once a classifier has been trained and exported",
     )
     model_path: Path | None = Field(
         default=None,
-        description="Path to distilled classifier (required when mode=ml)",
+        description="Path to the ONNX-exported classifier (required when mode=ml). "
+        "See src/edgeguard/training/edge_guard_training.ipynb.",
+    )
+    tokenizer_path: Path | None = Field(
+        default=None,
+        description="Path to the matching tokenizer.json (required when mode=ml)",
     )
     confidence_threshold: float = Field(
         default=0.75,

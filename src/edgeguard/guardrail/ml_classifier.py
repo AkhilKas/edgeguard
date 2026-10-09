@@ -1,61 +1,90 @@
-"""ML-based guardrail classifier (Week 4+).
+"""ML-based guardrail classifier.
 
-Loads a distilled text classifier from disk.
-Swap in by setting GUARDRAIL_MODE=ml and GUARDRAIL_MODEL_PATH=<path> in .env.
-The interface is identical to HeuristicClassifier — the pipeline doesn't change.
+Runs a DistilBERT prompt-injection classifier, exported to ONNX, via
+onnxruntime. Swap in by setting GUARDRAIL_MODE=ml, GUARDRAIL_MODEL_PATH=<onnx
+file>, and GUARDRAIL_TOKENIZER_PATH=<tokenizer.json> in .env.
+
+See src/edgeguard/training/edge_guard_training.ipynb for how these two
+artifacts are produced: it fine-tunes distilbert-base-uncased on
+deepset/prompt-injections (label 0 = safe, label 1 = injection) and exports
+the model to ONNX (inputs "input_ids"/"attention_mask", output "logits",
+shape [batch, 2]) alongside the matching tokenizer's tokenizer.json.
 """
 
 from pathlib import Path
 
+import numpy as np
+import onnxruntime as ort
 import structlog
+from tokenizers import Tokenizer
 
 from edgeguard.guardrail.base import BaseClassifier, ClassifierResult, Verdict
 
 log = structlog.get_logger(__name__)
 
+# Must match the padding/truncation length used during training.
+MAX_LENGTH = 128
+
 
 class MLClassifier(BaseClassifier):
-    """Distilled text classifier for prompt injection detection.
+    """Distilled DistilBERT classifier for prompt injection detection."""
 
-    Expected model format: a scikit-learn Pipeline or HuggingFace
-    transformers model saved with joblib/pickle.
-    Swap the loader below once the Week 4 training is done.
-    """
-
-    def __init__(self, model_path: Path, threshold: float = 0.75) -> None:
+    def __init__(
+        self, model_path: Path, tokenizer_path: Path, threshold: float = 0.75
+    ) -> None:
         self._threshold = threshold
-        self._model = self._load(model_path)
+        self._session = self._load_model(model_path)
+        self._tokenizer = self._load_tokenizer(tokenizer_path)
 
-    def _load(self, path: Path) -> object:
+    def _load_model(self, path: Path) -> ort.InferenceSession:
         try:
-            import joblib
-
-            model = joblib.load(path)
-            log.info("guardrail.ml_loaded", path=str(path))
-            return model
-        except ImportError as e:
-            raise RuntimeError("Install joblib: pip install joblib") from e
+            session = ort.InferenceSession(
+                str(path), providers=["CPUExecutionProvider"]
+            )
+            log.info("guardrail.ml_model_loaded", path=str(path))
+            return session
         except Exception as e:
-            raise RuntimeError(f"Failed to load ML classifier from {path}: {e}") from e
+            raise RuntimeError(f"Failed to load ONNX model from {path}: {e}") from e
+
+    def _load_tokenizer(self, path: Path) -> Tokenizer:
+        try:
+            tokenizer = Tokenizer.from_file(str(path))
+            # The HF tokenizer wrapper used in training applies padding and
+            # truncation at call time rather than baking it into the saved
+            # tokenizer.json, so we have to re-enable both here ourselves.
+            tokenizer.enable_padding(length=MAX_LENGTH)
+            tokenizer.enable_truncation(max_length=MAX_LENGTH)
+            log.info("guardrail.ml_tokenizer_loaded", path=str(path))
+            return tokenizer
+        except Exception as e:
+            raise RuntimeError(f"Failed to load tokenizer from {path}: {e}") from e
 
     def classify(self, prompt: str) -> ClassifierResult:
-        # Adjust this call once the trained model interface is known
-        proba = self._model.predict_proba([prompt])[0][1]  # type: ignore[attr-defined]
-        if proba >= self._threshold:
-            return ClassifierResult(
-                verdict=Verdict.INJECTED,
-                confidence=float(proba),
-            )
-        if proba >= self._threshold * 0.7:
-            return ClassifierResult(
-                verdict=Verdict.UNCERTAIN,
-                confidence=float(proba),
-            )
-        return ClassifierResult(
-            verdict=Verdict.CLEAN,
-            confidence=float(1 - proba),
+        encoding = self._tokenizer.encode(prompt)
+        input_ids: np.ndarray = np.asarray([encoding.ids], dtype=np.int64)
+        attention_mask: np.ndarray = np.asarray(
+            [encoding.attention_mask], dtype=np.int64
         )
+
+        (logits,) = self._session.run(
+            ["logits"],
+            {"input_ids": input_ids, "attention_mask": attention_mask},
+        )
+        proba = float(_softmax(logits[0])[1])  # P(injection)
+
+        if proba >= self._threshold:
+            return ClassifierResult(verdict=Verdict.INJECTED, confidence=proba)
+        if proba >= self._threshold * 0.7:
+            return ClassifierResult(verdict=Verdict.UNCERTAIN, confidence=proba)
+        return ClassifierResult(verdict=Verdict.CLEAN, confidence=1 - proba)
 
     @property
     def name(self) -> str:
-        return "ml_distilled"
+        return "ml_distilbert"
+
+
+def _softmax(logits: np.ndarray) -> np.ndarray:
+    shifted: np.ndarray = logits - np.max(logits)
+    exp: np.ndarray = np.exp(shifted)
+    result: np.ndarray = exp / exp.sum()
+    return result
