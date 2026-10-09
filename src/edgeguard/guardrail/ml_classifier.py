@@ -84,7 +84,7 @@ class MLClassifier(BaseClassifier):
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
-    shifted = logits - np.max(logits)
-    exp = np.exp(shifted)
+    shifted: np.ndarray = logits - np.max(logits)
+    exp: np.ndarray = np.exp(shifted)
     result: np.ndarray = exp / exp.sum()
     return result
