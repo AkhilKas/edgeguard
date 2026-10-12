@@ -4,11 +4,14 @@ Runs a DistilBERT prompt-injection classifier, exported to ONNX, via
 onnxruntime. Swap in by setting GUARDRAIL_MODE=ml, GUARDRAIL_MODEL_PATH=<onnx
 file>, and GUARDRAIL_TOKENIZER_PATH=<tokenizer.json> in .env.
 
-See src/edgeguard/training/edge_guard_training.ipynb for how these two
-artifacts are produced: it fine-tunes distilbert-base-uncased on
-deepset/prompt-injections (label 0 = safe, label 1 = injection) and exports
-the model to ONNX (inputs "input_ids"/"attention_mask", output "logits",
-shape [batch, 2]) alongside the matching tokenizer's tokenizer.json.
+See src/edgeguard/training/ for how these two artifacts are produced and the
+full model contract (README.md there). In short: the model takes
+"input_ids"/"attention_mask" (int64, variable sequence length — the ONNX
+graph has a dynamic sequence axis) and returns "logits" of shape [batch, 2],
+where index 1 is the injection probability. Inputs are truncated at
+MAX_LENGTH but NOT padded — the exported tokenizer.json has padding baked in
+from training, so it must be explicitly disabled here, or every prompt pads
+to MAX_LENGTH and inference gets ~10x slower for no accuracy benefit.
 """
 
 from pathlib import Path
@@ -22,7 +25,7 @@ from edgeguard.guardrail.base import BaseClassifier, ClassifierResult, Verdict
 
 log = structlog.get_logger(__name__)
 
-# Must match the padding/truncation length used during training.
+# Must match the truncation length used during training.
 MAX_LENGTH = 128
 
 
@@ -49,10 +52,12 @@ class MLClassifier(BaseClassifier):
     def _load_tokenizer(self, path: Path) -> Tokenizer:
         try:
             tokenizer = Tokenizer.from_file(str(path))
-            # The HF tokenizer wrapper used in training applies padding and
-            # truncation at call time rather than baking it into the saved
-            # tokenizer.json, so we have to re-enable both here ourselves.
-            tokenizer.enable_padding(length=MAX_LENGTH)
+            # tokenizer.json has padding-to-MAX_LENGTH baked in from
+            # training; disable it so short prompts aren't padded out to
+            # MAX_LENGTH on every request (the ONNX graph accepts variable
+            # sequence length, so padding only costs latency here, not
+            # correctness). Truncation still has to be set explicitly.
+            tokenizer.no_padding()
             tokenizer.enable_truncation(max_length=MAX_LENGTH)
             log.info("guardrail.ml_tokenizer_loaded", path=str(path))
             return tokenizer

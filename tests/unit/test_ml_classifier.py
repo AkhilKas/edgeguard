@@ -74,7 +74,7 @@ def test_load_model_wraps_errors(
         )
 
 
-def test_load_tokenizer_enables_padding_and_truncation(
+def test_load_tokenizer_disables_padding_and_enables_truncation(
     tmp_path: Path, mock_session_cls, mocker
 ) -> None:
     tokenizer_instance = mocker.MagicMock()
@@ -87,7 +87,7 @@ def test_load_tokenizer_enables_padding_and_truncation(
     MLClassifier(model_path=tmp_path / "classifier.onnx", tokenizer_path=tokenizer_path)
 
     mock_from_file.assert_called_once_with(str(tokenizer_path))
-    tokenizer_instance.enable_padding.assert_called_once_with(length=128)
+    tokenizer_instance.no_padding.assert_called_once_with()
     tokenizer_instance.enable_truncation.assert_called_once_with(max_length=128)
 
 
