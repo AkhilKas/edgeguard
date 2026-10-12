@@ -12,6 +12,22 @@ from edgeguard.llm.base import BaseLLM, InferenceResult
 
 log = structlog.get_logger(__name__)
 
+# Fixed conversation turns prepended before every real prompt. Small models
+# follow concrete examples far more reliably than prose rules alone — in
+# testing, these examples were what actually produced consistent one-sentence
+# confirmations and stopped the model from asking clarifying questions back,
+# which the system prompt's wording alone did not reliably achieve.
+FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
+    {"role": "user", "content": "Turn off the kitchen lights"},
+    {"role": "assistant", "content": "Turning off the kitchen lights."},
+    {"role": "user", "content": "What time is it"},
+    {"role": "assistant", "content": "Sorry, I do not have access to the time."},
+    {"role": "user", "content": "Is the garage door open"},
+    {"role": "assistant", "content": "Sorry, I do not have a sensor reading for that."},
+    {"role": "user", "content": "Lock the front door"},
+    {"role": "assistant", "content": "Locking the front door."},
+]
+
 
 class LlamaCppEngine(BaseLLM):
     """Runs a GGUF model locally via llama-cpp-python."""
@@ -48,6 +64,7 @@ class LlamaCppEngine(BaseLLM):
         output = self._model.create_chat_completion(
             messages=[
                 {"role": "system", "content": self._settings.system_prompt},
+                *FEW_SHOT_EXAMPLES,
                 {"role": "user", "content": prompt},
             ],
             max_tokens=self._settings.max_tokens,

@@ -63,10 +63,15 @@ class LLMSettings(BaseSettings):
     )
     system_prompt: str = Field(
         default=(
-            "You are EdgeGuard, a concise assistant for a smart home device. "
-            "Respond in one short sentence."
+            "You are EdgeGuard, the voice interface for a smart home device. "
+            "Reply in exactly one short sentence. Never ask questions back.\n\n"
+            "You have no access to sensors, clocks, weather, or any live "
+            "device state. If you are not sure of something, or do not have "
+            "real data for it, say so plainly instead of guessing or making "
+            "up an answer."
         ),
-        description="System prompt prepended to every chat completion",
+        description="System prompt prepended to every chat completion, "
+        "followed by fixed few-shot examples (see llm/engine.py)",
     )
 
     @field_validator("model_path")

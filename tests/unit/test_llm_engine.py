@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from edgeguard.config.settings import LLMSettings
-from edgeguard.llm.engine import LlamaCppEngine
+from edgeguard.llm.engine import FEW_SHOT_EXAMPLES, LlamaCppEngine
 
 
 @pytest.fixture
@@ -74,6 +74,7 @@ def test_generate_returns_inference_result(llm_settings: LLMSettings, mocker) ->
     mock_model.create_chat_completion.assert_called_once_with(
         messages=[
             {"role": "system", "content": llm_settings.system_prompt},
+            *FEW_SHOT_EXAMPLES,
             {"role": "user", "content": "hello there"},
         ],
         max_tokens=llm_settings.max_tokens,
