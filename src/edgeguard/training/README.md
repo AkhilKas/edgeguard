@@ -11,6 +11,16 @@ This folder holds the Google Colab notebook (`edge_guard_training.ipynb`) that t
 
 Training takes about 20–30 minutes end to end on Colab's free GPU.
 
+There's also `edge_guard_training_minilm.ipynb`: the same dataset and export
+approach, but fine-tuning `nreimers/MiniLM-L6-H384-uncased` (~22M params)
+instead of DistilBERT (~66M), for an even smaller/faster model. It exports
+to the same contract (`input_ids`/`attention_mask` → `logits`, variable
+sequence length), so `ml_classifier.py` works with either notebook's output
+unchanged — swap which `.onnx`/`tokenizer.json` pair you point
+`GUARDRAIL_MODEL_PATH`/`GUARDRAIL_TOKENIZER_PATH` at. Neither notebook has
+been run end-to-end yet, so there's no accuracy/latency comparison between
+the two — that's the natural next experiment once someone trains both.
+
 ---
 
 ## Before you start
