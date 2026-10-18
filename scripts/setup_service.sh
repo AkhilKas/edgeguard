@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installs EdgeGuard as a systemd service on the UNO Q.
-# Run once after cloning the repo and downloading the model.
+# Run once after cloning the repo, creating .venv (pip install -e ".[dev]"),
+# and downloading the model.
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,8 +16,12 @@ After=network.target
 Type=simple
 User=${USER}
 WorkingDirectory=${PROJECT_DIR}
-EnvironmentFile=${PROJECT_DIR}/.env
-ExecStart=$(which python3) -m edgeguard.api.server
+# No EnvironmentFile= here on purpose: systemd's parser doesn't strip
+# inline "#" comments the way our own dotenv loading does, so lines like
+# "MCU_ENABLED=true   # set false in CI" would load the comment text as
+# part of the value and fail pydantic validation. Settings() already reads
+# .env itself (relative to WorkingDirectory), so this isn't needed anyway.
+ExecStart=${PROJECT_DIR}/.venv/bin/python3 -m edgeguard.api.server
 Restart=on-failure
 RestartSec=5
 
