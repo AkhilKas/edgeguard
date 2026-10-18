@@ -34,7 +34,7 @@ class LLMSettings(BaseSettings):
     )
 
     model_path: Path = Field(
-        default=Path("models/qwen3.5-0.8b-q4_k_m.gguf"),
+        default=Path("models/lfm2.5-350m-q4_k_m.gguf"),
         description="Path to the GGUF model file",
     )
     context_window: int = Field(default=2048, ge=512, le=8192)

@@ -121,8 +121,11 @@ bash scripts/setup_runner.sh    # registers a self-hosted GitHub Actions runner
   tested against real trained weights — the training notebook hasn't been
   run end-to-end and no `.onnx`/`tokenizer.json` artifacts exist in the repo
   yet. Set `GUARDRAIL_MODEL_PATH` and `GUARDRAIL_TOKENIZER_PATH` once they do.
-- MCU integration: Linux-side Router Bridge wrapper implemented, and the
-  MCU-side sketch (`firmware/edgeguard_mcu/`) now exists and calls/provides
-  the methods it expects. Written directly against the official
-  `Arduino_RouterBridge` API, but not yet compiled or run on real
-  hardware — that's the next thing to verify.
+- MCU integration: **verified working end-to-end on real hardware** — MCU
+  reads a prompt, sends it over the Router Bridge, the Linux side runs
+  guardrail → LLM and sends a verdict back, and the MCU's onboard LED
+  responds with the correct pattern. The one bug hit during bring-up was
+  unrelated to the sketch itself: Arduino App Lab's own auto-provisioned
+  Docker container was left running in the background, starving the
+  manually-launched EdgeGuard process of CPU and making LLM inference take
+  ~30s instead of under a second — stopping that container fixed it.
