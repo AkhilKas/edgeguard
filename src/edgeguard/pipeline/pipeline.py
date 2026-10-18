@@ -85,6 +85,26 @@ class EdgeGuardPipeline:
                 total_latency_ms=guardrail_ms,
             )
 
+        if clf_result.verdict == Verdict.CLEAN and self._llm.wants_photo(prompt):
+            from edgeguard.actions import take_photo
+
+            action_note = take_photo()
+            reply = (
+                f"Captured a photo. {action_note}"
+                if action_note.startswith("Photo saved")
+                else action_note
+            )
+            return PipelineResult(
+                prompt=prompt,
+                verdict=clf_result.verdict,
+                confidence=clf_result.confidence,
+                matched_pattern=clf_result.matched_pattern,
+                llm_response=reply,
+                guardrail_latency_ms=guardrail_ms,
+                llm_latency_ms=None,
+                total_latency_ms=(time.perf_counter() - t0) * 1000,
+            )
+
         # ── Stage 2: LLM inference ───────────────────────────────────────────
         t1 = time.perf_counter()
         llm_result: InferenceResult = self._llm.generate(prompt)
