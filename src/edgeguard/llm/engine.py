@@ -18,6 +18,8 @@ log = structlog.get_logger(__name__)
 # confirmations and stopped the model from asking clarifying questions back,
 # which the system prompt's wording alone did not reliably achieve.
 FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
+    {"role": "user", "content": "do not open a camera"},
+    {"role": "assistant", "content": "Okay, I will not take a photo."},
     {"role": "user", "content": "Turn off the kitchen lights"},
     {"role": "assistant", "content": "Turning off the kitchen lights."},
     {"role": "user", "content": "What time is it"},
@@ -82,6 +84,40 @@ class LlamaCppEngine(BaseLLM):
             completion_tokens=usage.get("completion_tokens", 0),
             model_name=self._settings.model_path.stem,
         )
+
+    def wants_photo(self, prompt: str) -> bool:
+        """True only when the user is asking for a picture now."""
+        if self._model is None:
+            raise RuntimeError("Call load() before wants_photo()")
+
+        output = self._model.create_chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Decide whether the user wants a picture taken right now. "
+                        "A mention, a question, or a refusal is no. "
+                        "Reply with one word: yes or no."
+                    ),
+                },
+                {"role": "user", "content": "capture me"},
+                {"role": "assistant", "content": "yes"},
+                {"role": "user", "content": "do not open a camera"},
+                {"role": "assistant", "content": "no"},
+                {"role": "user", "content": "what is a camera"},
+                {"role": "assistant", "content": "no"},
+                {"role": "user", "content": "take a photo of the room"},
+                {"role": "assistant", "content": "yes"},
+                {"role": "user", "content": "the camera is on the shelf"},
+                {"role": "assistant", "content": "no"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=4,
+            temperature=0,
+            stop=["\n"],
+        )
+        answer = (output["choices"][0]["message"]["content"] or "").strip().lower()
+        return answer.startswith("yes")
 
     def is_loaded(self) -> bool:
         return self._model is not None
