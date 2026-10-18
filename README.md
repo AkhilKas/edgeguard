@@ -70,6 +70,11 @@ src/edgeguard/
                ML guardrail classifier. Not imported by the app; run in
                Colab, exported model artifacts are deployed separately
                and not committed to the repo.
+  firmware/    edgeguard_mcu/edgeguard_mcu.ino — the STM32 MCU-side sketch
+               that calls/provides the Router Bridge methods mcu/interface.py
+               expects (see firmware/edgeguard_mcu/README.md). Not Python,
+               not imported by the app; uploaded to the board separately
+               via Arduino App Lab.
 ```
 
 ## Quickstart
@@ -116,6 +121,8 @@ bash scripts/setup_runner.sh    # registers a self-hosted GitHub Actions runner
   tested against real trained weights — the training notebook hasn't been
   run end-to-end and no `.onnx`/`tokenizer.json` artifacts exist in the repo
   yet. Set `GUARDRAIL_MODEL_PATH` and `GUARDRAIL_TOKENIZER_PATH` once they do.
-- MCU integration: Linux-side Router Bridge wrapper implemented; the
-  corresponding MCU sketch (calling `Bridge.call("on_prompt", ...)` and
-  providing `set_status`) is not written yet.
+- MCU integration: Linux-side Router Bridge wrapper implemented, and the
+  MCU-side sketch (`firmware/edgeguard_mcu/`) now exists and calls/provides
+  the methods it expects. Written directly against the official
+  `Arduino_RouterBridge` API, but not yet compiled or run on real
+  hardware — that's the next thing to verify.
