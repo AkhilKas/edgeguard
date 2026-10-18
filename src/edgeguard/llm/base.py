@@ -21,6 +21,10 @@ class BaseLLM(ABC):
     def generate(self, prompt: str) -> InferenceResult:
         """Run inference and return a structured result."""
 
+    def wants_photo(self, prompt: str) -> bool:
+        """Return True when the user is asking for a picture right now."""
+        return False
+
     @abstractmethod
     def is_loaded(self) -> bool:
         """Return True if the model is loaded and ready."""
