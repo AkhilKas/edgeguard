@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI) -> Any:
         classifier=classifier,
         llm=engine,
         guardrail_enabled=settings.guardrail.enabled,
+        photo_dir=settings.actions.photo_dir,
     )
 
     # MCU (skipped if disabled, e.g. in CI)

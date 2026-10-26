@@ -151,6 +151,21 @@ class APISettings(BaseSettings):
     reload: bool = Field(default=False)
 
 
+class ActionsSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="ACTIONS_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+    photo_dir: Path = Field(
+        default=Path("/home/arduino/photos"),
+        description="Directory where actions.take_photo() saves captured frames",
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -170,6 +185,7 @@ class Settings(BaseSettings):
     guardrail: GuardrailSettings = Field(default_factory=GuardrailSettings)
     mcu: MCUSettings = Field(default_factory=MCUSettings)
     api: APISettings = Field(default_factory=APISettings)
+    actions: ActionsSettings = Field(default_factory=ActionsSettings)
 
 
 def get_settings() -> Settings:
