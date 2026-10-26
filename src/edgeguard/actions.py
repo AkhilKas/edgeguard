@@ -10,10 +10,8 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-PHOTO_DIR = Path("/home/arduino/photos")
 
-
-def take_photo() -> str:
+def take_photo(photo_dir: Path) -> str:
     try:
         import cv2
     except ImportError:
@@ -33,15 +31,14 @@ def take_photo() -> str:
     if not ok:
         return f"Camera failed: could not read /dev/video{index}."
 
-    PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-    path = PHOTO_DIR / f"shot-{datetime.now():%Y%m%d-%H%M%S}.jpg"
+    photo_dir.mkdir(parents=True, exist_ok=True)
+    path = photo_dir / f"shot-{datetime.now():%Y%m%d-%H%M%S}.jpg"
     cv2.imwrite(str(path), frame)
     log.info("action.photo", path=str(path), device=index)
     return f"Photo saved to {path}."
 
 
-def _camera_index() -> int | None:
-    root = Path("/sys/class/video4linux")
+def _camera_index(root: Path = Path("/sys/class/video4linux")) -> int | None:
     if not root.exists():
         return None
     for node in sorted(root.glob("video*")):

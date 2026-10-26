@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import structlog
 
@@ -44,10 +45,12 @@ class EdgeGuardPipeline:
         classifier: BaseClassifier,
         llm: BaseLLM,
         guardrail_enabled: bool = True,
+        photo_dir: Path = Path("/home/arduino/photos"),
     ) -> None:
         self._classifier = classifier
         self._llm = llm
         self._guardrail_enabled = guardrail_enabled
+        self._photo_dir = photo_dir
 
     def run(self, prompt: str) -> PipelineResult:
         t0 = time.perf_counter()
@@ -85,30 +88,47 @@ class EdgeGuardPipeline:
                 total_latency_ms=guardrail_ms,
             )
 
-        if clf_result.verdict == Verdict.CLEAN and self._llm.wants_photo(prompt):
-            from edgeguard.actions import take_photo
+        # wants_photo() is a real (small) inference call, so its time counts
+        # as LLM time too - tracked here rather than left invisible, and
+        # accumulated into llm_ms below even when it's not the photo path,
+        # since generate() still runs afterwards and both calls happened.
+        llm_ms = 0.0
 
-            action_note = take_photo()
-            reply = (
-                f"Captured a photo. {action_note}"
-                if action_note.startswith("Photo saved")
-                else action_note
+        if clf_result.verdict == Verdict.CLEAN:
+            t1 = time.perf_counter()
+            wants_photo = self._llm.wants_photo(prompt)
+            llm_ms += (time.perf_counter() - t1) * 1000
+
+            log.info(
+                "pipeline.wants_photo",
+                wants_photo=wants_photo,
+                latency_ms=round(llm_ms, 2),
             )
-            return PipelineResult(
-                prompt=prompt,
-                verdict=clf_result.verdict,
-                confidence=clf_result.confidence,
-                matched_pattern=clf_result.matched_pattern,
-                llm_response=reply,
-                guardrail_latency_ms=guardrail_ms,
-                llm_latency_ms=None,
-                total_latency_ms=(time.perf_counter() - t0) * 1000,
-            )
+
+            if wants_photo:
+                from edgeguard.actions import take_photo
+
+                action_note = take_photo(self._photo_dir)
+                reply = (
+                    f"Captured a photo. {action_note}"
+                    if action_note.startswith("Photo saved")
+                    else action_note
+                )
+                return PipelineResult(
+                    prompt=prompt,
+                    verdict=clf_result.verdict,
+                    confidence=clf_result.confidence,
+                    matched_pattern=clf_result.matched_pattern,
+                    llm_response=reply,
+                    guardrail_latency_ms=guardrail_ms,
+                    llm_latency_ms=round(llm_ms, 2),
+                    total_latency_ms=(time.perf_counter() - t0) * 1000,
+                )
 
         # ── Stage 2: LLM inference ───────────────────────────────────────────
-        t1 = time.perf_counter()
+        t2 = time.perf_counter()
         llm_result: InferenceResult = self._llm.generate(prompt)
-        llm_ms = (time.perf_counter() - t1) * 1000
+        llm_ms += (time.perf_counter() - t2) * 1000
         total_ms = (time.perf_counter() - t0) * 1000
 
         log.info(
