@@ -64,7 +64,9 @@ src/edgeguard/
   llm/         llama-cpp-python engine wrapper (chat completion, GGUF models)
   mcu/         Arduino Router Bridge interface to the STM32 MCU
   pipeline/    orchestrates guardrail -> LLM per request
-  api/         FastAPI app (routes, schemas, startup/shutdown wiring)
+  api/         FastAPI app (routes, schemas, startup/shutdown wiring) plus
+               static/index.html, a small browser dashboard for sending
+               prompts and reading results without curl or the MCU
   config/      all tunable settings, read from environment / .env
   training/    notebook + full guide (training/README.md) for training the
                ML guardrail classifier. Not imported by the app; run in
@@ -92,6 +94,13 @@ curl -X POST http://localhost:8000/prompt \
   -H "Content-Type: application/json" \
   -d '{"text": "Turn off the kitchen lights"}'
 ```
+
+Or open `http://<host>:8000/` in a browser for a small built-in dashboard
+(`api/static/index.html`) — send a prompt, see the verdict/response/latency
+breakdown, and a running history for the session. If `MCU_ENABLED=true`,
+prompting from the dashboard also notifies the board, same as a prompt that
+originates from the MCU itself — so you can watch the LED respond while
+testing from a laptop instead of the board's own serial console.
 
 On a machine without the MCU hardware (local dev, CI), set `MCU_ENABLED=false`
 in `.env` — the guardrail + LLM pipeline works standalone over HTTP.

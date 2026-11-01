@@ -31,3 +31,4 @@ class HealthResponse(BaseModel):
     guardrail_mode: str
     guardrail_enabled: bool
     deployment_context: str
+    mcu_enabled: bool
