@@ -98,6 +98,38 @@ def test_health_reports_pipeline_and_settings_state(
     assert response.llm_loaded is True
     assert response.guardrail_mode == settings.guardrail.mode.value
     assert response.deployment_context == settings.deployment_context
+    assert response.mcu_enabled == settings.mcu.enabled
+
+
+def test_dashboard_serves_html() -> None:
+    response = server_module.dashboard()
+
+    assert response.status_code == 200
+    assert response.media_type == "text/html"
+    assert b"EdgeGuard" in response.body
+
+
+def test_run_prompt_notifies_mcu_of_verdict(
+    pipeline: EdgeGuardPipeline, mocker
+) -> None:
+    mock_mcu = mocker.MagicMock()
+    server_module._mcu = mock_mcu
+    req = PromptRequest(text="Turn off the kitchen lights")
+
+    server_module.run_prompt(req, pipeline=pipeline)
+
+    mock_mcu.send_status.assert_called_once_with(Verdict.CLEAN.value)
+
+
+def test_run_prompt_skips_mcu_notify_when_not_connected(
+    pipeline: EdgeGuardPipeline,
+) -> None:
+    server_module._mcu = None
+    req = PromptRequest(text="Turn off the kitchen lights")
+
+    response = server_module.run_prompt(req, pipeline=pipeline)  # should not raise
+
+    assert response.verdict == Verdict.CLEAN.value
 
 
 def test_run_and_notify_sends_verdict_to_mcu(

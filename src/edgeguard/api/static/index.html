@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EdgeGuard</title>
+<style>
+  :root {
+    --clean: #1a7f37;
+    --injected: #cf222e;
+    --uncertain: #9a6700;
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 20px; font-size: 0.9rem; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 12px 0;
+    font-size: 0.95rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  #health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    font-size: 0.85rem;
+  }
+  #health-grid div { color: var(--muted); }
+  #health-grid span { color: var(--text); font-weight: 600; }
+  #refresh-health {
+    float: right;
+    font-size: 0.8rem;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 70px;
+    background: #0d1117;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 0.95rem;
+    resize: vertical;
+  }
+  .row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+  button.primary {
+    background: #238636;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button.primary:disabled { background: #30363d; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 0.8rem; }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.clean { background: rgba(26,127,55,0.15); color: var(--clean); }
+  .badge.injected { background: rgba(207,34,46,0.15); color: var(--injected); }
+  .badge.uncertain { background: rgba(154,103,0,0.15); color: var(--uncertain); }
+
+  #result { display: none; }
+  #result .meta { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
+  #result .response {
+    margin-top: 10px;
+    padding: 10px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    white-space: pre-wrap;
+  }
+  #error { color: var(--injected); font-size: 0.85rem; margin-top: 8px; display: none; }
+
+  #history { list-style: none; margin: 0; padding: 0; }
+  #history li {
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  #history li:first-child { border-top: none; }
+  #history .prompt { color: var(--text); }
+  #history .meta { color: var(--muted); margin-top: 2px; }
+  #history-empty { color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EdgeGuard</h1>
+  <p class="subtitle">On-device prompt injection detection — manual test console</p>
+
+  <section class="panel">
+    <h2>Status <button id="refresh-health">Refresh</button></h2>
+    <div id="health-grid">Loading…</div>
+  </section>
+
+  <section class="panel">
+    <h2>Send a prompt</h2>
+    <textarea id="prompt-input" placeholder="e.g. Turn off the kitchen lights"></textarea>
+    <div class="row">
+      <button class="primary" id="send-btn">Send</button>
+      <span class="hint" id="send-hint">Guardrail runs first; the LLM is only called if it passes.</span>
+    </div>
+    <div id="error"></div>
+    <div id="result">
+      <div><span class="badge" id="verdict-badge"></span> <span id="confidence"></span></div>
+      <div class="meta" id="pattern-line"></div>
+      <div class="response" id="llm-response"></div>
+      <div class="meta" id="latency-line"></div>
+      <div class="hint" id="mcu-note"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>History (this session)</h2>
+    <p id="history-empty">Nothing sent yet.</p>
+    <ul id="history"></ul>
+  </section>
+</main>
+
+<script>
+const healthGrid = document.getElementById("health-grid");
+const refreshBtn = document.getElementById("refresh-health");
+const promptInput = document.getElementById("prompt-input");
+const sendBtn = document.getElementById("send-btn");
+const errorBox = document.getElementById("error");
+const resultBox = document.getElementById("result");
+const historyList = document.getElementById("history");
+const historyEmpty = document.getElementById("history-empty");
+
+let mcuEnabled = false;
+
+async function loadHealth() {
+  healthGrid.textContent = "Loading…";
+  try {
+    const res = await fetch("/health");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const h = await res.json();
+    mcuEnabled = h.mcu_enabled;
+    healthGrid.innerHTML = `
+      <div>Status <span>${h.status}</span></div>
+      <div>LLM loaded <span>${h.llm_loaded ? "yes" : "no"}</span></div>
+      <div>Guardrail <span>${h.guardrail_mode}${h.guardrail_enabled ? "" : " (disabled)"}</span></div>
+      <div>MCU bridge <span>${h.mcu_enabled ? "enabled" : "disabled"}</span></div>
+      <div>Context <span>${h.deployment_context}</span></div>
+    `;
+  } catch (err) {
+    healthGrid.innerHTML = `<div style="color:#cf222e">Could not reach /health: ${err.message}</div>`;
+  }
+}
+
+function addHistoryEntry(promptText, result) {
+  historyEmpty.style.display = "none";
+  const li = document.createElement("li");
+  const time = new Date().toLocaleTimeString();
+  li.innerHTML = `
+    <div class="prompt">${escapeHtml(promptText)}</div>
+    <div class="meta">
+      <span class="badge ${result.verdict}">${result.verdict}</span>
+      ${time} · total ${result.total_latency_ms.toFixed(1)}ms
+    </div>
+  `;
+  historyList.prepend(li);
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function sendPrompt() {
+  const text = promptInput.value.trim();
+  if (!text) return;
+
+  errorBox.style.display = "none";
+  resultBox.style.display = "none";
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Running…";
+
+  try {
+    const res = await fetch("/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${res.status}`);
+    }
+    const result = await res.json();
+
+    document.getElementById("verdict-badge").textContent = result.verdict;
+    document.getElementById("verdict-badge").className = `badge ${result.verdict}`;
+    document.getElementById("confidence").textContent =
+      `confidence ${(result.confidence * 100).toFixed(1)}%`;
+    document.getElementById("pattern-line").textContent = result.matched_pattern
+      ? `matched pattern: ${result.matched_pattern}`
+      : "";
+    document.getElementById("llm-response").textContent =
+      result.llm_response ?? "(blocked — the LLM never ran)";
+    document.getElementById("latency-line").textContent =
+      `guardrail ${result.guardrail_latency_ms.toFixed(2)}ms` +
+      (result.llm_latency_ms != null ? ` · llm ${result.llm_latency_ms.toFixed(1)}ms` : "") +
+      ` · total ${result.total_latency_ms.toFixed(1)}ms`;
+    document.getElementById("mcu-note").textContent = mcuEnabled
+      ? "MCU bridge is enabled — check the board's LED for the matching verdict pattern."
+      : "MCU bridge is disabled — nothing should happen on the board for this request.";
+
+    resultBox.style.display = "block";
+    addHistoryEntry(text, result);
+    promptInput.value = "";
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = "block";
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = "Send";
+  }
+}
+
+refreshBtn.addEventListener("click", loadHealth);
+sendBtn.addEventListener("click", sendPrompt);
+promptInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendPrompt();
+});
+
+loadHealth();
+</script>
+</body>
+</html>

@@ -7,11 +7,13 @@ Uses FastAPI lifespan for clean startup/shutdown of hardware resources.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.responses import HTMLResponse
 
 from edgeguard.api.schemas import HealthResponse, PipelineResponse, PromptRequest
 from edgeguard.config.settings import Settings, get_settings
@@ -21,6 +23,8 @@ from edgeguard.mcu.interface import MCUInterface
 from edgeguard.pipeline.pipeline import EdgeGuardPipeline
 
 log = structlog.get_logger(__name__)
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 # Module-level singletons initialised in lifespan
 _pipeline: EdgeGuardPipeline | None = None
@@ -92,13 +96,25 @@ def get_settings_dep() -> Settings:
     return get_settings()
 
 
+@app.get("/", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    """Serve the browser dashboard for prompting the pipeline manually."""
+    return HTMLResponse((_STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+
 @app.post("/prompt", response_model=PipelineResponse)
 def run_prompt(
     req: PromptRequest,
     pipeline: EdgeGuardPipeline = Depends(get_pipeline),
 ) -> PipelineResponse:
-    """Submit a prompt through the full guardrail → LLM pipeline."""
+    """Submit a prompt through the full guardrail → LLM pipeline.
+
+    Also notifies the MCU of the verdict, same as an MCU-originated prompt,
+    so the board's LED responds regardless of where the prompt came from.
+    """
     result = pipeline.run(req.text)
+    if _mcu is not None:
+        _mcu.send_status(result.verdict.value)
     return PipelineResponse(
         verdict=result.verdict.value,
         confidence=result.confidence,
@@ -121,6 +137,7 @@ def health(
         guardrail_mode=settings.guardrail.mode.value,
         guardrail_enabled=settings.guardrail.enabled,
         deployment_context=settings.deployment_context,
+        mcu_enabled=settings.mcu.enabled,
     )
 
 
