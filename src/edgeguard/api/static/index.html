@@ -61,6 +61,43 @@
     cursor: pointer;
   }
 
+  .conn-row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .conn-row input {
+    flex: 1;
+    background: #0d1117;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+  }
+  .conn-row button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .mcu-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #30363d; border-radius: 22px; transition: 0.15s;
+  }
+  .slider::before {
+    content: ""; position: absolute; height: 16px; width: 16px;
+    left: 3px; bottom: 3px; background: white; border-radius: 50%;
+    transition: 0.15s;
+  }
+  .switch input:checked + .slider { background: #238636; }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+  .switch input:disabled + .slider { cursor: not-allowed; opacity: 0.6; }
+  #mcu-status-text { font-size: 0.85rem; color: var(--muted); }
+
   textarea {
     width: 100%;
     min-height: 70px;
@@ -128,8 +165,28 @@
   <p class="subtitle">On-device prompt injection detection — manual test console</p>
 
   <section class="panel">
+    <h2>Connection</h2>
+    <div class="conn-row">
+      <input type="text" id="api-base" placeholder="API base URL (blank = this same page's origin)">
+    </div>
+    <div class="conn-row">
+      <input type="password" id="api-key" placeholder="API key (only needed if the backend requires one)">
+      <button id="save-connection">Save</button>
+    </div>
+    <p class="hint">Stored only in this browser (localStorage) — never sent anywhere but the API base URL above.</p>
+  </section>
+
+  <section class="panel">
     <h2>Status <button id="refresh-health">Refresh</button></h2>
     <div id="health-grid">Loading…</div>
+    <div class="mcu-row">
+      <label class="switch">
+        <input type="checkbox" id="mcu-toggle">
+        <span class="slider"></span>
+      </label>
+      <span>MCU bridge</span>
+      <span id="mcu-status-text"></span>
+    </div>
   </section>
 
   <section class="panel">
@@ -165,27 +222,118 @@ const errorBox = document.getElementById("error");
 const resultBox = document.getElementById("result");
 const historyList = document.getElementById("history");
 const historyEmpty = document.getElementById("history-empty");
+const apiBaseInput = document.getElementById("api-base");
+const apiKeyInput = document.getElementById("api-key");
+const saveConnectionBtn = document.getElementById("save-connection");
+const mcuToggle = document.getElementById("mcu-toggle");
+const mcuStatusText = document.getElementById("mcu-status-text");
 
-let mcuEnabled = false;
+const LS_BASE = "edgeguard_api_base";
+const LS_KEY = "edgeguard_api_key";
+
+let mcuConnected = false;
+
+function loadConnectionFields() {
+  try {
+    apiBaseInput.value = localStorage.getItem(LS_BASE) || "";
+    apiKeyInput.value = localStorage.getItem(LS_KEY) || "";
+  } catch {
+    // localStorage unavailable (private browsing, blocked, etc.) — fine, just defaults to same-origin/no key.
+  }
+}
+
+function apiBase() {
+  try {
+    return (localStorage.getItem(LS_BASE) || "").replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function apiKey() {
+  try {
+    return localStorage.getItem(LS_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function apiFetch(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {});
+  const key = apiKey();
+  if (key) headers["X-API-Key"] = key;
+  return fetch(apiBase() + path, Object.assign({}, options, { headers }));
+}
 
 async function loadHealth() {
   healthGrid.textContent = "Loading…";
   try {
-    const res = await fetch("/health");
+    const res = await apiFetch("/health");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const h = await res.json();
-    mcuEnabled = h.mcu_enabled;
     healthGrid.innerHTML = `
       <div>Status <span>${h.status}</span></div>
       <div>LLM loaded <span>${h.llm_loaded ? "yes" : "no"}</span></div>
       <div>Guardrail <span>${h.guardrail_mode}${h.guardrail_enabled ? "" : " (disabled)"}</span></div>
-      <div>MCU bridge <span>${h.mcu_enabled ? "enabled" : "disabled"}</span></div>
       <div>Context <span>${h.deployment_context}</span></div>
     `;
   } catch (err) {
     healthGrid.innerHTML = `<div style="color:#cf222e">Could not reach /health: ${err.message}</div>`;
   }
 }
+
+async function loadMcuStatus() {
+  mcuStatusText.textContent = "checking…";
+  try {
+    const res = await apiFetch("/mcu/status");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    mcuConnected = s.connected;
+    mcuToggle.checked = s.enabled;
+    mcuStatusText.textContent = s.enabled
+      ? (s.connected ? "board connected" : "on, board not responding")
+      : "off";
+  } catch (err) {
+    mcuStatusText.textContent = `unreachable: ${err.message}`;
+  }
+}
+
+mcuToggle.addEventListener("change", async () => {
+  const desired = mcuToggle.checked;
+  mcuToggle.disabled = true;
+  mcuStatusText.textContent = desired ? "connecting…" : "turning off…";
+  try {
+    const res = await apiFetch("/mcu/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: desired }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    mcuConnected = s.connected;
+    mcuToggle.checked = s.enabled;
+    mcuStatusText.textContent = s.enabled
+      ? (s.connected ? "board connected" : "on, board not responding")
+      : "off";
+  } catch (err) {
+    mcuToggle.checked = !desired;
+    errorBox.textContent = `MCU toggle failed: ${err.message}`;
+    errorBox.style.display = "block";
+  } finally {
+    mcuToggle.disabled = false;
+  }
+});
+
+saveConnectionBtn.addEventListener("click", () => {
+  try {
+    localStorage.setItem(LS_BASE, apiBaseInput.value.trim());
+    localStorage.setItem(LS_KEY, apiKeyInput.value.trim());
+  } catch {
+    // localStorage unavailable — connection settings just won't persist across reloads.
+  }
+  loadHealth();
+  loadMcuStatus();
+});
 
 function addHistoryEntry(promptText, result) {
   historyEmpty.style.display = "none";
@@ -217,7 +365,7 @@ async function sendPrompt() {
   sendBtn.textContent = "Running…";
 
   try {
-    const res = await fetch("/prompt", {
+    const res = await apiFetch("/prompt", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -241,9 +389,9 @@ async function sendPrompt() {
       `guardrail ${result.guardrail_latency_ms.toFixed(2)}ms` +
       (result.llm_latency_ms != null ? ` · llm ${result.llm_latency_ms.toFixed(1)}ms` : "") +
       ` · total ${result.total_latency_ms.toFixed(1)}ms`;
-    document.getElementById("mcu-note").textContent = mcuEnabled
-      ? "MCU bridge is enabled — check the board's LED for the matching verdict pattern."
-      : "MCU bridge is disabled — nothing should happen on the board for this request.";
+    document.getElementById("mcu-note").textContent = mcuConnected
+      ? "MCU bridge is connected — check the board's LED for the matching verdict pattern."
+      : "MCU bridge is off or the board isn't responding — nothing should happen on the board for this request.";
 
     resultBox.style.display = "block";
     addHistoryEntry(text, result);
@@ -257,13 +405,18 @@ async function sendPrompt() {
   }
 }
 
-refreshBtn.addEventListener("click", loadHealth);
+refreshBtn.addEventListener("click", () => {
+  loadHealth();
+  loadMcuStatus();
+});
 sendBtn.addEventListener("click", sendPrompt);
 promptInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendPrompt();
 });
 
+loadConnectionFields();
 loadHealth();
+loadMcuStatus();
 </script>
 </body>
 </html>

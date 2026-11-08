@@ -112,3 +112,74 @@ def test_send_status_notifies_bridge(enabled_settings: MCUSettings, mocker) -> N
     mcu.send_status("blocked")
 
     mock_bridge.notify.assert_called_once_with("set_status", "blocked")
+
+
+def test_disconnect_clears_bridge(enabled_settings: MCUSettings, mocker) -> None:
+    mcu = MCUInterface(enabled_settings)
+    mcu._bridge = mocker.MagicMock()
+
+    mcu.disconnect()
+
+    assert mcu._bridge is None
+
+
+def test_ping_false_when_not_connected(enabled_settings: MCUSettings) -> None:
+    mcu = MCUInterface(enabled_settings)
+
+    assert mcu.ping() is False
+
+
+def test_ping_true_when_bridge_responds(enabled_settings: MCUSettings, mocker) -> None:
+    mcu = MCUInterface(enabled_settings)
+    mock_bridge = mocker.MagicMock()
+    mcu._bridge = mock_bridge
+
+    assert mcu.ping(timeout=1.5) is True
+    mock_bridge.call.assert_called_once_with("ping", timeout=1.5)
+
+
+def test_ping_false_on_timeout(enabled_settings: MCUSettings, mocker) -> None:
+    mcu = MCUInterface(enabled_settings)
+    mock_bridge = mocker.MagicMock()
+    mock_bridge.call.side_effect = TimeoutError
+    mcu._bridge = mock_bridge
+
+    assert mcu.ping() is False
+
+
+def test_disabled_interface_starts_with_enabled_false(
+    disabled_settings: MCUSettings,
+) -> None:
+    mcu = MCUInterface(disabled_settings)
+
+    assert mcu.enabled is False
+
+
+def test_enable_connects_and_reports_ping_result(
+    disabled_settings: MCUSettings, mocker
+) -> None:
+    mock_bridge_instance = mocker.MagicMock()
+    mock_bridge_instance.connect.return_value = True
+    mock_bridge_instance.call.return_value = None
+    mocker.patch("edgeguard.mcu.interface.Bridge", return_value=mock_bridge_instance)
+    mcu = MCUInterface(disabled_settings)
+
+    result = mcu.enable()
+
+    assert mcu.enabled is True
+    assert result is True
+    mock_bridge_instance.connect.assert_called_once()
+
+
+def test_disable_disconnects_and_flips_enabled(
+    enabled_settings: MCUSettings, mocker
+) -> None:
+    mcu = MCUInterface(enabled_settings)
+    mock_bridge = mocker.MagicMock()
+    mcu._bridge = mock_bridge
+
+    mcu.disable()
+
+    mock_bridge.disconnect.assert_called_once()
+    assert mcu.enabled is False
+    assert mcu._bridge is None

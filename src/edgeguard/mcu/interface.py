@@ -40,10 +40,16 @@ class MCUInterface:
         self._settings = settings
         self._bridge: Bridge | None = None
         self._prompt_callback: PromptCallback | None = None
+        self._enabled = settings.enabled
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the bridge is currently turned on (may still be disconnected)."""
+        return self._enabled
 
     def connect(self) -> None:
-        if not self._settings.enabled:
-            log.info("mcu.disabled", reason="MCU_ENABLED=false")
+        if not self._enabled:
+            log.info("mcu.disabled", reason="not enabled")
             return
 
         self._bridge = Bridge(address=self._settings.address)
@@ -57,7 +63,38 @@ class MCUInterface:
     def disconnect(self) -> None:
         if self._bridge is not None:
             self._bridge.disconnect()
+            self._bridge = None
             log.info("mcu.disconnected")
+
+    def enable(self) -> bool:
+        """Turn the bridge on at runtime (e.g. from the dashboard toggle).
+
+        Returns whether the MCU actually responded afterwards, so callers
+        don't have to make a separate ping() call to report a result.
+        """
+        self._enabled = True
+        self.connect()
+        return self.ping()
+
+    def disable(self) -> None:
+        """Turn the bridge off at runtime."""
+        self.disconnect()
+        self._enabled = False
+
+    def ping(self, timeout: float = 2.0) -> bool:
+        """Actively check whether the MCU is connected and responding right now.
+
+        Unlike `enabled`, this doesn't just report our own state — it makes a
+        blocking round-trip call to the sketch's "ping" handler, so a toggled-on
+        bridge whose board was unplugged still reports False.
+        """
+        if self._bridge is None:
+            return False
+        try:
+            self._bridge.call("ping", timeout=timeout)
+            return True
+        except (TimeoutError, ConnectionError, ValueError, RuntimeError):
+            return False
 
     def on_prompt(self, callback: PromptCallback) -> None:
         """Register a callback that fires when the MCU sends a prompt."""
