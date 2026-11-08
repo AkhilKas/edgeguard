@@ -10,10 +10,6 @@
 //   Linux -> MCU:  Bridge.notify("set_status", status)
 //                  status is "clean" | "injected" | "uncertain". We provide
 //                  "set_status" to receive it.
-//   Linux -> MCU:  Bridge.call("ping") — a blocking round-trip the Linux side
-//                  uses to confirm the board is actually connected and
-//                  responding (e.g. for a dashboard toggle), not just that a
-//                  bridge connection was opened at some point.
 //
 // Input: there's no mic/button/sensor decided yet, so prompts come from the
 // USB serial console for now — type a line, press enter, it's sent as a
@@ -37,10 +33,6 @@ bool onSetStatus(String status) {
   return true;
 }
 
-bool onPing() {
-  return true;
-}
-
 void setup() {
   Bridge.begin();
   Monitor.begin(115200);
@@ -48,7 +40,6 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   Bridge.provide("set_status", onSetStatus);
-  Bridge.provide("ping", onPing);
 
   Monitor.println("EdgeGuard MCU ready. Type a prompt and press enter.");
 }
