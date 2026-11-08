@@ -89,6 +89,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 def _maybe_add_cors(app: FastAPI, settings: Settings) -> None:
     """Allow cross-origin requests only when explicitly configured.
 

@@ -161,9 +161,7 @@ def test_enable_connects_and_reports_ping_result(
     mock_bridge_instance = mocker.MagicMock()
     mock_bridge_instance.connect.return_value = True
     mock_bridge_instance.call.return_value = None
-    mocker.patch(
-        "edgeguard.mcu.interface.Bridge", return_value=mock_bridge_instance
-    )
+    mocker.patch("edgeguard.mcu.interface.Bridge", return_value=mock_bridge_instance)
     mcu = MCUInterface(disabled_settings)
 
     result = mcu.enable()

@@ -185,7 +185,9 @@ def test_require_api_key_rejects_missing_or_wrong_key(settings: Settings) -> Non
 def test_require_api_key_accepts_matching_key(settings: Settings) -> None:
     settings.api.key = "secret"
 
-    server_module.require_api_key(x_api_key="secret", settings=settings)  # should not raise
+    server_module.require_api_key(
+        x_api_key="secret", settings=settings
+    )  # should not raise
 
 
 def test_toggle_mcu_enables_and_returns_status(mocker) -> None:
