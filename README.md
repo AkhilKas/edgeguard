@@ -97,13 +97,36 @@ curl -X POST http://localhost:8000/prompt \
 
 Or open `http://<host>:8000/` in a browser for a small built-in dashboard
 (`api/static/index.html`) — send a prompt, see the verdict/response/latency
-breakdown, and a running history for the session. If `MCU_ENABLED=true`,
-prompting from the dashboard also notifies the board, same as a prompt that
-originates from the MCU itself — so you can watch the LED respond while
-testing from a laptop instead of the board's own serial console.
+breakdown, and a running history for the session. The dashboard also has an
+MCU bridge toggle: flip it on/off without restarting the service, and it
+reports whether the board is actually connected (not just whether the toggle
+is on) by pinging it over the Router Bridge.
 
 On a machine without the MCU hardware (local dev, CI), set `MCU_ENABLED=false`
-in `.env` — the guardrail + LLM pipeline works standalone over HTTP.
+in `.env` — the guardrail + LLM pipeline works standalone over HTTP, and the
+dashboard's MCU toggle can still be used to connect later if a board shows up.
+
+### Hosting the dashboard somewhere other than the board
+
+The guardrail + LLM + MCU bridge backend has to keep running on the board
+itself — the Router Bridge is a local, same-device link to the MCU, not
+reachable over the network. But the dashboard (`api/static/index.html`) is
+just static HTML/JS: it can be hosted anywhere (GitHub Pages, Vercel, a
+Claude Artifact, …) as long as it can reach the board's API over the network.
+To do that:
+
+1. Set `API_KEY` in `.env` on the board — once the API is reachable from
+   outside your local network, this is the only thing stopping anyone who
+   finds the URL from sending prompts or toggling the MCU bridge.
+2. Set `API_CORS_ORIGINS` to the dashboard's origin, e.g.
+   `API_CORS_ORIGINS=["https://your-dashboard.example.com"]`.
+3. Make the board's API reachable from wherever the dashboard is hosted —
+   on the same LAN, that's just its IP; from off-network, use a tunnel (e.g.
+   `cloudflared tunnel --url http://localhost:8000` for a quick, no-account
+   tunnel, or Tailscale Funnel for something more permanent).
+4. Open the hosted dashboard, enter the board's URL (or tunnel URL) and the
+   API key in the **Connection** panel — stored only in that browser's
+   `localStorage`, never baked into the page itself.
 
 ## Development
 
@@ -138,3 +161,7 @@ bash scripts/setup_runner.sh    # registers a self-hosted GitHub Actions runner
   Docker container was left running in the background, starving the
   manually-launched EdgeGuard process of CPU and making LLM inference take
   ~30s instead of under a second — stopping that container fixed it.
+  The runtime MCU on/off toggle (`/mcu/toggle`, `/mcu/status`) and the
+  `ping` round-trip it relies on are implemented and unit tested, but not
+  yet exercised against the real board — verify against hardware before
+  relying on them.

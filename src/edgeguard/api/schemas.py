@@ -32,3 +32,12 @@ class HealthResponse(BaseModel):
     guardrail_enabled: bool
     deployment_context: str
     mcu_enabled: bool
+
+
+class MCUToggleRequest(BaseModel):
+    enabled: bool
+
+
+class MCUStatusResponse(BaseModel):
+    enabled: bool
+    connected: bool

@@ -144,6 +144,118 @@ def test_run_and_notify_sends_verdict_to_mcu(
     mock_mcu.send_status.assert_called_once_with(Verdict.CLEAN.value)
 
 
+def test_maybe_add_cors_skips_when_unconfigured(settings: Settings) -> None:
+    from fastapi import FastAPI
+
+    test_app = FastAPI()
+
+    server_module._maybe_add_cors(test_app, settings)
+
+    assert test_app.user_middleware == []
+
+
+def test_maybe_add_cors_adds_middleware_when_configured(settings: Settings) -> None:
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    settings.api.cors_origins = ["https://example.com"]
+    test_app = FastAPI()
+
+    server_module._maybe_add_cors(test_app, settings)
+
+    assert any(m.cls is CORSMiddleware for m in test_app.user_middleware)
+
+
+def test_require_api_key_noop_when_unset(settings: Settings) -> None:
+    server_module.require_api_key(x_api_key=None, settings=settings)  # should not raise
+    server_module.require_api_key(x_api_key="anything", settings=settings)  # also fine
+
+
+def test_require_api_key_rejects_missing_or_wrong_key(settings: Settings) -> None:
+    settings.api.key = "secret"
+
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.require_api_key(x_api_key=None, settings=settings)
+    assert exc_info.value.status_code == 401
+
+    with pytest.raises(HTTPException):
+        server_module.require_api_key(x_api_key="wrong", settings=settings)
+
+
+def test_require_api_key_accepts_matching_key(settings: Settings) -> None:
+    settings.api.key = "secret"
+
+    server_module.require_api_key(x_api_key="secret", settings=settings)  # should not raise
+
+
+def test_toggle_mcu_enables_and_returns_status(mocker) -> None:
+    mock_mcu = mocker.MagicMock()
+    mock_mcu.enable.return_value = True
+    mock_mcu.enabled = True
+    server_module._mcu = mock_mcu
+
+    response = server_module.toggle_mcu(server_module.MCUToggleRequest(enabled=True))
+
+    mock_mcu.enable.assert_called_once()
+    assert response.enabled is True
+    assert response.connected is True
+
+
+def test_toggle_mcu_disables_and_returns_status(mocker) -> None:
+    mock_mcu = mocker.MagicMock()
+    mock_mcu.enabled = False
+    server_module._mcu = mock_mcu
+
+    response = server_module.toggle_mcu(server_module.MCUToggleRequest(enabled=False))
+
+    mock_mcu.disable.assert_called_once()
+    assert response.enabled is False
+    assert response.connected is False
+
+
+def test_toggle_mcu_raises_when_not_initialised() -> None:
+    server_module._mcu = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.toggle_mcu(server_module.MCUToggleRequest(enabled=True))
+
+    assert exc_info.value.status_code == 503
+
+
+def test_mcu_status_reports_disconnected_when_not_initialised() -> None:
+    server_module._mcu = None
+
+    response = server_module.mcu_status()
+
+    assert response.enabled is False
+    assert response.connected is False
+
+
+def test_mcu_status_pings_when_enabled(mocker) -> None:
+    mock_mcu = mocker.MagicMock()
+    mock_mcu.enabled = True
+    mock_mcu.ping.return_value = True
+    server_module._mcu = mock_mcu
+
+    response = server_module.mcu_status()
+
+    mock_mcu.ping.assert_called_once()
+    assert response.enabled is True
+    assert response.connected is True
+
+
+def test_mcu_status_skips_ping_when_disabled(mocker) -> None:
+    mock_mcu = mocker.MagicMock()
+    mock_mcu.enabled = False
+    server_module._mcu = mock_mcu
+
+    response = server_module.mcu_status()
+
+    mock_mcu.ping.assert_not_called()
+    assert response.enabled is False
+    assert response.connected is False
+
+
 def test_run_and_notify_noop_when_pipeline_not_ready() -> None:
     server_module._pipeline = None
     server_module._mcu = None
