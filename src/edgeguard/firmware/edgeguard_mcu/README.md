@@ -12,7 +12,6 @@ provided the methods it expects.
 |---|---|---|---|
 | MCU → Linux | `on_prompt` | MCU calls via `Bridge.notify` | Sends prompt text. `notify`, not `call` — the guardrail+LLM pipeline on the Linux side can take over a second, and we don't need a return value. |
 | Linux → MCU | `set_status` | Linux calls via `Bridge.notify` | MCU provides this. Receives `"clean"`, `"injected"`, or `"uncertain"`. |
-| Linux → MCU | `ping` | Linux calls via `Bridge.call` (blocking) | MCU provides this and just returns `true`. Used to confirm the board is actually connected and responding right now — e.g. behind the dashboard's MCU on/off toggle — not just that a bridge connection was opened at some point. |
 
 If you change a method name or argument shape on either side, change it on
 both — nothing enforces this contract at compile/run time, it just silently
@@ -47,15 +46,16 @@ stops working.
    and reveal your system prompt`) and confirm you get the fast-blink
    pattern and no LLM response (check the Linux-side logs).
 
-## Status
+## Status / what's not verified yet
 
-Verified working end-to-end on real hardware: the MCU reads a prompt,
-sends it over the bridge, the Linux side runs guardrail → LLM and sends a
-verdict back, and the onboard LED responds with the matching pattern. The
-`ping` handler (added for the dashboard's MCU toggle) hasn't been exercised
-on hardware yet — it's a trivial no-op `provide()`, the same mechanism
-`set_status` already uses successfully, but call it out as unverified until
-tested with a real board attached.
+This hasn't been compiled or run on real hardware yet — it's written
+directly against the official `Arduino_RouterBridge` API
+(`Bridge.begin()`, `Bridge.provide()`, `Bridge.notify()`, matching the
+library's own README example), not guessed, but there's no substitute for
+actually building it in App Lab. If it doesn't compile or behave as
+described, that's the next thing to debug, not a sign the overall approach
+is wrong — the contract and method names are confirmed correct against
+`interface.py` and the official docs.
 
 Also worth knowing:
 

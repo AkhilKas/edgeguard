@@ -12,17 +12,10 @@ from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse
 
-from edgeguard.api.schemas import (
-    HealthResponse,
-    MCUStatusResponse,
-    MCUToggleRequest,
-    PipelineResponse,
-    PromptRequest,
-)
+from edgeguard.api.schemas import HealthResponse, PipelineResponse, PromptRequest
 from edgeguard.config.settings import Settings, get_settings
 from edgeguard.guardrail.factory import build_classifier
 from edgeguard.llm.engine import LlamaCppEngine
@@ -90,25 +83,6 @@ app = FastAPI(
 )
 
 
-def _maybe_add_cors(app: FastAPI, settings: Settings) -> None:
-    """Allow cross-origin requests only when explicitly configured.
-
-    Needed once the dashboard is hosted somewhere other than this API
-    (API_CORS_ORIGINS unset keeps the default same-origin-only behaviour).
-    """
-    if settings.api.cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.api.cors_origins,
-            allow_credentials=False,
-            allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type", "X-API-Key"],
-        )
-
-
-_maybe_add_cors(app, get_settings())
-
-
 def get_pipeline() -> EdgeGuardPipeline:
     if _pipeline is None:
         raise HTTPException(
@@ -122,31 +96,13 @@ def get_settings_dep() -> Settings:
     return get_settings()
 
 
-def require_api_key(
-    x_api_key: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings_dep),
-) -> None:
-    """Gate a route behind API_KEY, when one is configured.
-
-    No-op when API_KEY is unset, so local/LAN use is unaffected — this only
-    matters once the API is reachable from outside the local network.
-    """
-    if settings.api.key and x_api_key != settings.api.key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid X-API-Key header",
-        )
-
-
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     """Serve the browser dashboard for prompting the pipeline manually."""
     return HTMLResponse((_STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
-@app.post(
-    "/prompt", response_model=PipelineResponse, dependencies=[Depends(require_api_key)]
-)
+@app.post("/prompt", response_model=PipelineResponse)
 def run_prompt(
     req: PromptRequest,
     pipeline: EdgeGuardPipeline = Depends(get_pipeline),
@@ -183,39 +139,6 @@ def health(
         deployment_context=settings.deployment_context,
         mcu_enabled=settings.mcu.enabled,
     )
-
-
-@app.post(
-    "/mcu/toggle",
-    response_model=MCUStatusResponse,
-    dependencies=[Depends(require_api_key)],
-)
-def toggle_mcu(req: MCUToggleRequest) -> MCUStatusResponse:
-    """Turn the MCU bridge on or off at runtime, from the dashboard toggle."""
-    if _mcu is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MCU interface not initialised",
-        )
-    if req.enabled:
-        connected = _mcu.enable()
-    else:
-        _mcu.disable()
-        connected = False
-    return MCUStatusResponse(enabled=_mcu.enabled, connected=connected)
-
-
-@app.get(
-    "/mcu/status",
-    response_model=MCUStatusResponse,
-    dependencies=[Depends(require_api_key)],
-)
-def mcu_status() -> MCUStatusResponse:
-    """Report whether the bridge is on, and whether the board is responding."""
-    if _mcu is None:
-        return MCUStatusResponse(enabled=False, connected=False)
-    connected = _mcu.ping() if _mcu.enabled else False
-    return MCUStatusResponse(enabled=_mcu.enabled, connected=connected)
 
 
 def main() -> None:

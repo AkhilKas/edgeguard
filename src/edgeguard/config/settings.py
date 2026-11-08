@@ -149,19 +149,6 @@ class APISettings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000, ge=1024, le=65535)
     reload: bool = Field(default=False)
-    cors_origins: list[str] = Field(
-        default_factory=list,
-        description="Origins allowed to call this API from a browser (e.g. an "
-        "externally-hosted dashboard). Empty disables CORS entirely, which is "
-        "correct when the dashboard is served from this same API.",
-    )
-    key: str | None = Field(
-        default=None,
-        description="If set, required via the X-API-Key header on /prompt and "
-        "/mcu/* routes. Set this before exposing the API outside the local "
-        "network (e.g. through a tunnel) — unset, those routes are open to "
-        "anyone who can reach the port.",
-    )
 
 
 class ActionsSettings(BaseSettings):
