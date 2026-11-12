@@ -20,8 +20,8 @@ Run: .venv/bin/python train_guardrail.py
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import onnx
@@ -160,7 +160,7 @@ def build_dataset() -> DatasetDict:
     return dataset
 
 
-def compute_metrics(eval_pred):
+def compute_metrics(eval_pred: Any) -> dict[str, float]:
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
     precision, recall, f1, _ = precision_recall_fscore_support(
@@ -178,7 +178,7 @@ def main() -> None:
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-    def tokenize_batch(examples):
+    def tokenize_batch(examples: Any) -> Any:
         return tokenizer(
             examples["text"],
             truncation=True,
@@ -285,4 +285,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
