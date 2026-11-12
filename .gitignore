@@ -16,6 +16,10 @@ models/
 *.gguf
 *.bin
 
+# Local training outputs (see src/edgeguard/training/README.md)
+src/edgeguard/training/artifacts/
+src/edgeguard/training/train.log
+
 # Environment
 .env
 

@@ -1,0 +1,13 @@
+# Training-only dependencies — deliberately separate from pyproject.toml,
+# which only needs the runtime ONNX/tokenizer deps (see guardrail/ml_classifier.py).
+# Install into src/edgeguard/training/.venv, not the app's main .venv.
+transformers
+datasets
+torch
+accelerate
+scikit-learn
+onnx
+onnxruntime
+onnxscript
+huggingface_hub
+pandas
