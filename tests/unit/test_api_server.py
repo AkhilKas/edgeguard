@@ -28,9 +28,11 @@ def reset_server_globals():
     """Module-level singletons must not leak state between tests."""
     original_pipeline = server_module._pipeline
     original_mcu = server_module._mcu
+    original_stt = server_module._stt
     yield
     server_module._pipeline = original_pipeline
     server_module._mcu = original_mcu
+    server_module._stt = original_stt
 
 
 @pytest.fixture
@@ -92,6 +94,7 @@ def test_run_prompt_blocks_injection(pipeline: EdgeGuardPipeline) -> None:
 def test_health_reports_pipeline_and_settings_state(
     pipeline: EdgeGuardPipeline, settings: Settings
 ) -> None:
+    server_module._stt = None
     response = server_module.health(pipeline=pipeline, settings=settings)
 
     assert response.status == "ok"
@@ -99,6 +102,57 @@ def test_health_reports_pipeline_and_settings_state(
     assert response.guardrail_mode == settings.guardrail.mode.value
     assert response.deployment_context == settings.deployment_context
     assert response.mcu_enabled == settings.mcu.enabled
+    assert response.stt_enabled is False
+    assert response.stt_loaded is False
+
+
+def test_get_stt_raises_when_unavailable() -> None:
+    server_module._stt = None
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.get_stt()
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_run_voice_transcribes_then_runs_pipeline(
+    pipeline: EdgeGuardPipeline, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.is_loaded = True
+    mock_stt.transcribe.return_value = ("Turn off the kitchen lights", 12.5)
+    server_module._stt = mock_stt
+    server_module._mcu = None
+
+    upload = mocker.MagicMock()
+    upload.filename = "command.webm"
+    upload.read = mocker.AsyncMock(return_value=b"fake-webm")
+
+    response = await server_module.run_voice(
+        audio=upload, pipeline=pipeline, stt=mock_stt
+    )
+
+    assert response.heard == "Turn off the kitchen lights"
+    assert response.stt_latency_ms == 12.5
+    assert response.verdict == Verdict.CLEAN.value
+    assert response.llm_response is not None
+    mock_stt.transcribe.assert_called_once_with(b"fake-webm", filename="command.webm")
+
+
+@pytest.mark.asyncio
+async def test_run_voice_rejects_empty_transcript(
+    pipeline: EdgeGuardPipeline, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.transcribe.return_value = ("", 3.0)
+    upload = mocker.MagicMock()
+    upload.filename = "command.webm"
+    upload.read = mocker.AsyncMock(return_value=b"fake")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server_module.run_voice(audio=upload, pipeline=pipeline, stt=mock_stt)
+
+    assert exc_info.value.status_code == 400
+    assert "didn't catch" in str(exc_info.value.detail).lower()
 
 
 def test_dashboard_serves_html() -> None:

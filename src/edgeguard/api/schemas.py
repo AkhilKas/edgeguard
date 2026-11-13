@@ -32,3 +32,19 @@ class HealthResponse(BaseModel):
     guardrail_enabled: bool
     deployment_context: str
     mcu_enabled: bool
+    stt_enabled: bool
+    stt_loaded: bool
+
+
+class VoiceResponse(BaseModel):
+    """Pipeline result plus what Whisper transcribed from the mic clip."""
+
+    heard: str
+    stt_latency_ms: float
+    verdict: str
+    confidence: float
+    matched_pattern: str | None
+    llm_response: str | None
+    guardrail_latency_ms: float
+    llm_latency_ms: float | None
+    total_latency_ms: float

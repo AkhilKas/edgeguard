@@ -14,6 +14,7 @@
     --border: #30363d;
     --text: #e6edf3;
     --muted: #8b949e;
+    --hear: #58a6ff;
   }
   * { box-sizing: border-box; }
   body {
@@ -72,7 +73,7 @@
     font-size: 0.95rem;
     resize: vertical;
   }
-  .row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+  .row { display: flex; gap: 10px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
   button.primary {
     background: #238636;
     color: white;
@@ -83,7 +84,35 @@
     cursor: pointer;
   }
   button.primary:disabled { background: #30363d; cursor: not-allowed; }
+  button.mic {
+    background: #21262d;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button.mic:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.mic.hearing {
+    background: rgba(88, 166, 255, 0.15);
+    border-color: var(--hear);
+    color: var(--hear);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.65; }
+  }
   .hint { color: var(--muted); font-size: 0.8rem; }
+  #voice-status {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: var(--hear);
+    min-height: 1.2em;
+  }
+  #voice-status.heard { color: var(--text); }
+  #voice-status.error { color: var(--injected); }
 
   .badge {
     display: inline-block;
@@ -134,11 +163,13 @@
 
   <section class="panel">
     <h2>Send a prompt</h2>
-    <textarea id="prompt-input" placeholder="e.g. Turn off the kitchen lights"></textarea>
+    <textarea id="prompt-input" placeholder="e.g. Turn off the kitchen lights — or use the mic"></textarea>
     <div class="row">
       <button class="primary" id="send-btn">Send</button>
+      <button class="mic" id="mic-btn" type="button">Mic</button>
       <span class="hint" id="send-hint">Guardrail runs first; the LLM is only called if it passes.</span>
     </div>
+    <div id="voice-status" aria-live="polite"></div>
     <div id="error"></div>
     <div id="result">
       <div><span class="badge" id="verdict-badge"></span> <span id="confidence"></span></div>
@@ -161,12 +192,24 @@ const healthGrid = document.getElementById("health-grid");
 const refreshBtn = document.getElementById("refresh-health");
 const promptInput = document.getElementById("prompt-input");
 const sendBtn = document.getElementById("send-btn");
+const micBtn = document.getElementById("mic-btn");
+const voiceStatus = document.getElementById("voice-status");
 const errorBox = document.getElementById("error");
 const resultBox = document.getElementById("result");
 const historyList = document.getElementById("history");
 const historyEmpty = document.getElementById("history-empty");
 
 let mcuEnabled = false;
+let sttReady = false;
+let mediaRecorder = null;
+let mediaStream = null;
+let audioChunks = [];
+let recording = false;
+
+function setVoiceStatus(text, kind) {
+  voiceStatus.textContent = text || "";
+  voiceStatus.className = kind || "";
+}
 
 async function loadHealth() {
   healthGrid.textContent = "Loading…";
@@ -175,15 +218,22 @@ async function loadHealth() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const h = await res.json();
     mcuEnabled = h.mcu_enabled;
+    sttReady = !!(h.stt_enabled && h.stt_loaded);
+    micBtn.disabled = !sttReady;
+    micBtn.title = sttReady
+      ? "Click to speak a command, click again to stop"
+      : "STT not ready — set STT_ENABLED=true and pip install -e \".[stt]\"";
     healthGrid.innerHTML = `
       <div>Status <span>${h.status}</span></div>
       <div>LLM loaded <span>${h.llm_loaded ? "yes" : "no"}</span></div>
       <div>Guardrail <span>${h.guardrail_mode}${h.guardrail_enabled ? "" : " (disabled)"}</span></div>
       <div>MCU bridge <span>${h.mcu_enabled ? "enabled" : "disabled"}</span></div>
+      <div>Whisper STT <span>${h.stt_enabled ? (h.stt_loaded ? "ready" : "enabled, not loaded") : "off"}</span></div>
       <div>Context <span>${h.deployment_context}</span></div>
     `;
   } catch (err) {
     healthGrid.innerHTML = `<div style="color:#cf222e">Could not reach /health: ${err.message}</div>`;
+    micBtn.disabled = true;
   }
 }
 
@@ -207,12 +257,39 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function showPipelineResult(promptText, result, extraLatency) {
+  document.getElementById("verdict-badge").textContent = result.verdict;
+  document.getElementById("verdict-badge").className = `badge ${result.verdict}`;
+  document.getElementById("confidence").textContent =
+    `confidence ${(result.confidence * 100).toFixed(1)}%`;
+  document.getElementById("pattern-line").textContent = result.matched_pattern
+    ? `matched pattern: ${result.matched_pattern}`
+    : "";
+  document.getElementById("llm-response").textContent =
+    result.llm_response ?? "(blocked — the LLM never ran)";
+  let latency =
+    `guardrail ${result.guardrail_latency_ms.toFixed(2)}ms` +
+    (result.llm_latency_ms != null ? ` · llm ${result.llm_latency_ms.toFixed(1)}ms` : "") +
+    ` · total ${result.total_latency_ms.toFixed(1)}ms`;
+  if (extraLatency != null) {
+    latency = `stt ${extraLatency.toFixed(1)}ms · ` + latency;
+  }
+  document.getElementById("latency-line").textContent = latency;
+  document.getElementById("mcu-note").textContent = mcuEnabled
+    ? "MCU bridge is enabled — check the board's LED for the matching verdict pattern."
+    : "MCU bridge is disabled — nothing should happen on the board for this request.";
+
+  resultBox.style.display = "block";
+  addHistoryEntry(promptText, result);
+}
+
 async function sendPrompt() {
   const text = promptInput.value.trim();
   if (!text) return;
 
   errorBox.style.display = "none";
   resultBox.style.display = "none";
+  setVoiceStatus("");
   sendBtn.disabled = true;
   sendBtn.textContent = "Running…";
 
@@ -227,26 +304,7 @@ async function sendPrompt() {
       throw new Error(body.detail || `HTTP ${res.status}`);
     }
     const result = await res.json();
-
-    document.getElementById("verdict-badge").textContent = result.verdict;
-    document.getElementById("verdict-badge").className = `badge ${result.verdict}`;
-    document.getElementById("confidence").textContent =
-      `confidence ${(result.confidence * 100).toFixed(1)}%`;
-    document.getElementById("pattern-line").textContent = result.matched_pattern
-      ? `matched pattern: ${result.matched_pattern}`
-      : "";
-    document.getElementById("llm-response").textContent =
-      result.llm_response ?? "(blocked — the LLM never ran)";
-    document.getElementById("latency-line").textContent =
-      `guardrail ${result.guardrail_latency_ms.toFixed(2)}ms` +
-      (result.llm_latency_ms != null ? ` · llm ${result.llm_latency_ms.toFixed(1)}ms` : "") +
-      ` · total ${result.total_latency_ms.toFixed(1)}ms`;
-    document.getElementById("mcu-note").textContent = mcuEnabled
-      ? "MCU bridge is enabled — check the board's LED for the matching verdict pattern."
-      : "MCU bridge is disabled — nothing should happen on the board for this request.";
-
-    resultBox.style.display = "block";
-    addHistoryEntry(text, result);
+    showPipelineResult(text, result);
     promptInput.value = "";
   } catch (err) {
     errorBox.textContent = err.message;
@@ -257,8 +315,113 @@ async function sendPrompt() {
   }
 }
 
+function pickMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",
+  ];
+  for (const t of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
+
+async function startHearing() {
+  if (!sttReady) {
+    setVoiceStatus("Whisper STT is off on the server. Enable STT_ENABLED and install .[stt].", "error");
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setVoiceStatus("This browser cannot access a microphone.", "error");
+    return;
+  }
+
+  errorBox.style.display = "none";
+  resultBox.style.display = "none";
+  audioChunks = [];
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    setVoiceStatus(`Mic permission denied: ${err.message}`, "error");
+    return;
+  }
+
+  const mime = pickMimeType();
+  mediaRecorder = mime
+    ? new MediaRecorder(mediaStream, { mimeType: mime })
+    : new MediaRecorder(mediaStream);
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) audioChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    mediaStream.getTracks().forEach((t) => t.stop());
+    mediaStream = null;
+    submitVoiceClip(mediaRecorder.mimeType || "audio/webm");
+  };
+
+  mediaRecorder.start();
+  recording = true;
+  micBtn.classList.add("hearing");
+  micBtn.textContent = "Stop";
+  sendBtn.disabled = true;
+  setVoiceStatus("Hearing… speak your command, then click Stop.", "");
+}
+
+function stopHearing() {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  recording = false;
+  micBtn.classList.remove("hearing");
+  micBtn.textContent = "Mic";
+  setVoiceStatus("Hearing… transcribing with Whisper.", "");
+  mediaRecorder.stop();
+}
+
+async function submitVoiceClip(mimeType) {
+  const blob = new Blob(audioChunks, { type: mimeType });
+  audioChunks = [];
+  if (blob.size < 100) {
+    setVoiceStatus("Clip was too short — hold a bit longer and try again.", "error");
+    sendBtn.disabled = false;
+    return;
+  }
+
+  const ext = mimeType.includes("ogg") ? "ogg"
+    : mimeType.includes("mp4") ? "m4a"
+    : "webm";
+  const form = new FormData();
+  form.append("audio", blob, `command.${ext}`);
+
+  try {
+    const res = await fetch("/voice", { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body.detail || `HTTP ${res.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    promptInput.value = body.heard;
+    setVoiceStatus(`I heard: “${body.heard}”`, "heard");
+    showPipelineResult(body.heard, body, body.stt_latency_ms);
+  } catch (err) {
+    setVoiceStatus(err.message, "error");
+    errorBox.textContent = err.message;
+    errorBox.style.display = "block";
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+function toggleMic() {
+  if (recording) stopHearing();
+  else startHearing();
+}
+
 refreshBtn.addEventListener("click", loadHealth);
 sendBtn.addEventListener("click", sendPrompt);
+micBtn.addEventListener("click", toggleMic);
 promptInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendPrompt();
 });

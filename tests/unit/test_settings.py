@@ -13,6 +13,7 @@ from edgeguard.config.settings import (
     LogLevel,
     MCUSettings,
     Settings,
+    STTSettings,
     get_settings,
 )
 
@@ -61,6 +62,15 @@ def test_api_settings_accepts_valid_port() -> None:
     assert settings.port == 9000
 
 
+def test_stt_settings_defaults() -> None:
+    settings = STTSettings()
+
+    assert settings.enabled is False
+    assert settings.model_size == "tiny"
+    assert settings.device == "cpu"
+    assert settings.compute_type == "int8"
+
+
 def test_settings_assembles_nested_sections(tmp_path: Path) -> None:
     model_file = tmp_path / "model.gguf"
     model_file.touch()
@@ -70,12 +80,15 @@ def test_settings_assembles_nested_sections(tmp_path: Path) -> None:
         guardrail=GuardrailSettings(),
         mcu=MCUSettings(enabled=False),
         api=APISettings(),
+        stt=STTSettings(enabled=True, model_size="base"),
     )
 
     assert settings.llm.model_path == model_file
     assert settings.mcu.enabled is False
     assert settings.log_level == LogLevel.INFO
     assert settings.deployment_context == "home_assistant"
+    assert settings.stt.enabled is True
+    assert settings.stt.model_size == "base"
 
 
 def test_get_settings_returns_settings_instance(

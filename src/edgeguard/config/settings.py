@@ -166,6 +166,34 @@ class ActionsSettings(BaseSettings):
     )
 
 
+class STTSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="STT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Load Whisper at startup for /voice (requires pip install -e '.[stt]')",
+    )
+    model_size: str = Field(
+        default="tiny",
+        description="faster-whisper size: tiny | base | small | … (tiny is best on UNO Q)",
+    )
+    device: str = Field(default="cpu")
+    compute_type: str = Field(
+        default="int8",
+        description="faster-whisper compute type; int8 is the lightest on CPU",
+    )
+    language: str = Field(
+        default="en",
+        description="Force language code, or empty to let Whisper detect",
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -186,6 +214,7 @@ class Settings(BaseSettings):
     mcu: MCUSettings = Field(default_factory=MCUSettings)
     api: APISettings = Field(default_factory=APISettings)
     actions: ActionsSettings = Field(default_factory=ActionsSettings)
+    stt: STTSettings = Field(default_factory=STTSettings)
 
 
 def get_settings() -> Settings:
