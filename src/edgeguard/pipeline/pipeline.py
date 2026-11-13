@@ -31,6 +31,7 @@ class PipelineResult:
     guardrail_latency_ms: float
     llm_latency_ms: float | None  # None if blocked
     total_latency_ms: float
+    photo_path: Path | None = None  # set when take_photo saved a JPEG
 
 
 class EdgeGuardPipeline:
@@ -46,11 +47,15 @@ class EdgeGuardPipeline:
         llm: BaseLLM,
         guardrail_enabled: bool = True,
         photo_dir: Path = Path("/home/arduino/photos"),
+        camera_warmup_seconds: float = 1.5,
+        camera_discard_frames: int = 8,
     ) -> None:
         self._classifier = classifier
         self._llm = llm
         self._guardrail_enabled = guardrail_enabled
         self._photo_dir = photo_dir
+        self._camera_warmup_seconds = camera_warmup_seconds
+        self._camera_discard_frames = camera_discard_frames
 
     def run(self, prompt: str) -> PipelineResult:
         t0 = time.perf_counter()
@@ -108,12 +113,19 @@ class EdgeGuardPipeline:
             if wants_photo:
                 from edgeguard.actions import take_photo
 
-                action_note = take_photo(self._photo_dir)
-                reply = (
-                    f"Captured a photo. {action_note}"
-                    if action_note.startswith("Photo saved")
-                    else action_note
+                action_note = take_photo(
+                    self._photo_dir,
+                    warmup_seconds=self._camera_warmup_seconds,
+                    discard_frames=self._camera_discard_frames,
                 )
+                photo_path: Path | None = None
+                if action_note.startswith("Photo saved to "):
+                    photo_path = Path(
+                        action_note.removeprefix("Photo saved to ").rstrip(".")
+                    )
+                    reply = f"Captured a photo. {action_note}"
+                else:
+                    reply = action_note
                 return PipelineResult(
                     prompt=prompt,
                     verdict=clf_result.verdict,
@@ -123,6 +135,7 @@ class EdgeGuardPipeline:
                     guardrail_latency_ms=guardrail_ms,
                     llm_latency_ms=round(llm_ms, 2),
                     total_latency_ms=(time.perf_counter() - t0) * 1000,
+                    photo_path=photo_path,
                 )
 
         # ── Stage 2: LLM inference ───────────────────────────────────────────

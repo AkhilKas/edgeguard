@@ -164,6 +164,60 @@ class ActionsSettings(BaseSettings):
         default=Path("/home/arduino/photos"),
         description="Directory where actions.take_photo() saves captured frames",
     )
+    camera_warmup_seconds: float = Field(
+        default=1.5,
+        ge=0.5,
+        le=10.0,
+        description="Keep the USB camera streaming at least this long before "
+        "saving a frame (lets the Brio LED/AE settle)",
+    )
+    camera_discard_frames: int = Field(
+        default=8,
+        ge=0,
+        le=60,
+        description="Drop this many frames during warmup before the kept shot",
+    )
+
+
+class STTSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="STT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Load Whisper at startup for /voice (requires pip install -e '.[stt]')",
+    )
+    model_size: str = Field(
+        default="tiny",
+        description="faster-whisper size: tiny | base | small | … (tiny is best on UNO Q)",
+    )
+    device: str = Field(default="cpu")
+    compute_type: str = Field(
+        default="int8",
+        description="faster-whisper compute type; int8 is the lightest on CPU",
+    )
+    language: str = Field(
+        default="en",
+        description="Force language code, or empty to let Whisper detect",
+    )
+    record_seconds: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=15.0,
+        description="How long /voice/device records from the board mic",
+    )
+    alsa_device: str = Field(
+        default="auto",
+        description="ALSA -D for arecord: auto|plughw:N,M|plug:default. "
+        "'default' often fails on USB cams; auto picks a USB/Brio card from "
+        "`arecord -l`",
+    )
+    sample_rate: int = Field(default=16000, ge=8000, le=48000)
 
 
 class Settings(BaseSettings):
@@ -186,6 +240,7 @@ class Settings(BaseSettings):
     mcu: MCUSettings = Field(default_factory=MCUSettings)
     api: APISettings = Field(default_factory=APISettings)
     actions: ActionsSettings = Field(default_factory=ActionsSettings)
+    stt: STTSettings = Field(default_factory=STTSettings)
 
 
 def get_settings() -> Settings:

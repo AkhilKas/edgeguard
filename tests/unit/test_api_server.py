@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from edgeguard.api import server as server_module
 from edgeguard.api.schemas import PromptRequest
 from edgeguard.config.settings import (
+    ActionsSettings,
     APISettings,
     GuardrailSettings,
     LLMSettings,
@@ -20,7 +21,7 @@ from edgeguard.config.settings import (
     Settings,
 )
 from edgeguard.guardrail.base import Verdict
-from edgeguard.pipeline.pipeline import EdgeGuardPipeline
+from edgeguard.pipeline.pipeline import EdgeGuardPipeline, PipelineResult
 
 
 @pytest.fixture(autouse=True)
@@ -28,20 +29,25 @@ def reset_server_globals():
     """Module-level singletons must not leak state between tests."""
     original_pipeline = server_module._pipeline
     original_mcu = server_module._mcu
+    original_stt = server_module._stt
     yield
     server_module._pipeline = original_pipeline
     server_module._mcu = original_mcu
+    server_module._stt = original_stt
 
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     model_file = tmp_path / "model.gguf"
     model_file.touch()
+    photos = tmp_path / "photos"
+    photos.mkdir()
     return Settings(
         llm=LLMSettings(model_path=model_file),
         guardrail=GuardrailSettings(),
         mcu=MCUSettings(enabled=False),
         api=APISettings(),
+        actions=ActionsSettings(photo_dir=photos),
     )
 
 
@@ -92,6 +98,7 @@ def test_run_prompt_blocks_injection(pipeline: EdgeGuardPipeline) -> None:
 def test_health_reports_pipeline_and_settings_state(
     pipeline: EdgeGuardPipeline, settings: Settings
 ) -> None:
+    server_module._stt = None
     response = server_module.health(pipeline=pipeline, settings=settings)
 
     assert response.status == "ok"
@@ -99,6 +106,81 @@ def test_health_reports_pipeline_and_settings_state(
     assert response.guardrail_mode == settings.guardrail.mode.value
     assert response.deployment_context == settings.deployment_context
     assert response.mcu_enabled == settings.mcu.enabled
+    assert response.stt_enabled is False
+    assert response.stt_loaded is False
+
+
+def test_get_stt_raises_when_unavailable() -> None:
+    server_module._stt = None
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.get_stt()
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_run_voice_transcribes_then_runs_pipeline(
+    pipeline: EdgeGuardPipeline, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.is_loaded = True
+    mock_stt.transcribe.return_value = ("Turn off the kitchen lights", 12.5)
+    server_module._stt = mock_stt
+    server_module._mcu = None
+
+    upload = mocker.MagicMock()
+    upload.filename = "command.webm"
+    upload.read = mocker.AsyncMock(return_value=b"fake-webm")
+
+    response = await server_module.run_voice(
+        audio=upload, pipeline=pipeline, stt=mock_stt
+    )
+
+    assert response.heard == "Turn off the kitchen lights"
+    assert response.stt_latency_ms == 12.5
+    assert response.verdict == Verdict.CLEAN.value
+    assert response.llm_response is not None
+    mock_stt.transcribe.assert_called_once_with(b"fake-webm", filename="command.webm")
+
+
+@pytest.mark.asyncio
+async def test_run_voice_rejects_empty_transcript(
+    pipeline: EdgeGuardPipeline, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.transcribe.return_value = ("", 3.0)
+    upload = mocker.MagicMock()
+    upload.filename = "command.webm"
+    upload.read = mocker.AsyncMock(return_value=b"fake")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server_module.run_voice(audio=upload, pipeline=pipeline, stt=mock_stt)
+
+    assert exc_info.value.status_code == 400
+    assert "didn't catch" in str(exc_info.value.detail).lower()
+
+
+def test_run_voice_device_records_then_transcribes(
+    pipeline: EdgeGuardPipeline, settings: Settings, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.is_loaded = True
+    mock_stt.transcribe.return_value = ("take a photo", 9.0)
+    server_module._stt = mock_stt
+    server_module._mcu = None
+    mocker.patch(
+        "edgeguard.stt.device_record.record_wav",
+        return_value=b"RIFF" + b"\x00" * 200,
+    )
+    mocker.patch.object(server_module, "get_settings", return_value=settings)
+
+    response = server_module.run_voice_device(
+        pipeline=pipeline, stt=mock_stt, settings=settings
+    )
+
+    assert response.heard == "take a photo"
+    assert response.verdict == Verdict.CLEAN.value
+    mock_stt.transcribe.assert_called_once()
+    assert mock_stt.transcribe.call_args.kwargs["filename"] == "device.wav"
 
 
 def test_dashboard_serves_html() -> None:
@@ -188,3 +270,58 @@ def test_main_runs_uvicorn_with_settings_values(settings: Settings, mocker) -> N
         reload=settings.api.reload,
         log_level=settings.log_level.value.lower(),
     )
+
+
+def test_pipeline_response_includes_photo_url(
+    pipeline: EdgeGuardPipeline, settings: Settings
+) -> None:
+    server_module._pipeline = pipeline
+    pipeline._photo_dir = settings.actions.photo_dir
+    shot = settings.actions.photo_dir / "shot-demo.jpg"
+    shot.write_bytes(b"jpg")
+    result = PipelineResult(
+        prompt="take a photo",
+        verdict=Verdict.CLEAN,
+        confidence=0.05,
+        matched_pattern=None,
+        llm_response="Captured a photo.",
+        guardrail_latency_ms=1.0,
+        llm_latency_ms=2.0,
+        total_latency_ms=3.0,
+        photo_path=shot,
+    )
+
+    response = server_module._pipeline_response(result)
+
+    assert response.photo_url == "/photos/shot-demo.jpg"
+
+
+def test_list_photos_returns_recent_files(settings: Settings) -> None:
+    older = settings.actions.photo_dir / "shot-old.jpg"
+    newer = settings.actions.photo_dir / "shot-new.jpg"
+    older.write_bytes(b"old")
+    newer.write_bytes(b"new")
+    import os
+
+    os.utime(older, (1_000_000, 1_000_000))
+    os.utime(newer, (2_000_000, 2_000_000))
+
+    response = server_module.list_photos(settings=settings, limit=10)
+
+    assert [p.name for p in response.photos] == ["shot-new.jpg", "shot-old.jpg"]
+    assert response.photos[0].url == "/photos/shot-new.jpg"
+
+
+def test_get_photo_serves_file(settings: Settings) -> None:
+    shot = settings.actions.photo_dir / "shot-serve.jpg"
+    shot.write_bytes(b"jpeg-bytes")
+
+    response = server_module.get_photo(name="shot-serve.jpg", settings=settings)
+
+    assert Path(response.path) == shot.resolve()
+
+
+def test_get_photo_rejects_path_traversal(settings: Settings) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.get_photo(name="../etc/passwd", settings=settings)
+    assert exc_info.value.status_code == 400
