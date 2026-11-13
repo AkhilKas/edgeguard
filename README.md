@@ -40,7 +40,8 @@ Routes (`src/edgeguard/api/server.py`):
 |---|---|---|
 | `GET` | `/` | Browser dashboard (`api/static/index.html`) |
 | `POST` | `/prompt` | Run the full pipeline (`{"text": "..."}`) |
-| `POST` | `/voice` | Upload a short mic clip → Whisper STT → same pipeline (needs `STT_ENABLED=true` + `pip install -e ".[stt]"`) |
+| `POST` | `/voice` | Upload a browser mic clip → Whisper → pipeline (needs HTTPS/localhost for browser mic) |
+| `POST` | `/voice/device` | Record from board ALSA mic (Brio) → Whisper → pipeline (works over plain `http://board-ip`) |
 | `GET` | `/health` | Status: LLM loaded, guardrail mode, MCU/STT flags, etc. |
 
 If `MCU_ENABLED=true` and the Router Bridge is connected, `/prompt` also
@@ -274,7 +275,7 @@ Honest snapshot of what this repository currently supports:
 | LLM path | `LlamaCppEngine` loads a real GGUF at process start. Default download script fetches LFM2.5-350M Q4_K_M. CI and unit tests use mocks / a dummy path — they do not exercise real inference |
 | HTTP API + dashboard | Implemented (`/`, `/prompt`, `/health`) |
 | Photo action | Implemented for clean prompts when `wants_photo` returns true; needs a camera device and OpenCV |
-| Voice commands | Optional: browser mic → `/voice` → faster-whisper (`tiny` by default) → pipeline. Off unless `STT_ENABLED=true` and `pip install -e ".[stt]"` (also needs system `ffmpeg`) |
+| Voice commands | Optional Whisper STT. Prefer dashboard **Listen on device** → `POST /voice/device` (board ALSA/`arecord`, works on plain HTTP). Browser mic still available via `/voice` but needs HTTPS/localhost. Needs `STT_ENABLED=true`, `pip install -e ".[stt]"`, `ffmpeg`, `alsa-utils` |
 | MCU Linux bridge | Implemented (`mcu/interface.py`); skipped when `MCU_ENABLED=false` |
 | MCU firmware sketch | Present and written against `Arduino_RouterBridge`; firmware README states it has not been treated as fully verified bring-up documentation — treat hardware E2E as something to confirm on your board, not as already proven by CI |
 | Packaging / CI | `pyproject.toml`, Makefile, GitHub Actions CI (lint, format, mypy, unit tests). CD assumes a registered self-hosted runner and systemd unit |

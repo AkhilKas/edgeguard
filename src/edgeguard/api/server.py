@@ -59,6 +59,8 @@ async def lifespan(app: FastAPI) -> Any:
         llm=engine,
         guardrail_enabled=settings.guardrail.enabled,
         photo_dir=settings.actions.photo_dir,
+        camera_warmup_seconds=settings.actions.camera_warmup_seconds,
+        camera_discard_frames=settings.actions.camera_discard_frames,
     )
 
     # MCU (skipped if disabled, e.g. in CI)
@@ -160,20 +162,12 @@ def run_prompt(
     return _pipeline_response(result)
 
 
-@app.post("/voice", response_model=VoiceResponse)
-async def run_voice(
-    audio: UploadFile = File(..., description="Short recorded clip (webm/wav/ogg)"),
-    pipeline: EdgeGuardPipeline = Depends(get_pipeline),
-    stt: WhisperSTT = Depends(get_stt),
+def _voice_from_audio(
+    raw: bytes,
+    filename: str,
+    pipeline: EdgeGuardPipeline,
+    stt: WhisperSTT,
 ) -> VoiceResponse:
-    """Transcribe a mic recording with Whisper, then run the normal pipeline.
-
-    The dashboard records in the browser and uploads the blob here. The mic
-    used is whatever the *browser* selects (pick the Brio in the OS/input
-    device list when the UI is opened from a machine that has it attached).
-    """
-    raw = await audio.read()
-    filename = audio.filename or "audio.webm"
     try:
         heard, stt_ms = stt.transcribe(raw, filename=filename)
     except ValueError as e:
@@ -209,6 +203,51 @@ async def run_voice(
         llm_latency_ms=pipe.llm_latency_ms,
         total_latency_ms=pipe.total_latency_ms,
     )
+
+
+@app.post("/voice", response_model=VoiceResponse)
+async def run_voice(
+    audio: UploadFile = File(..., description="Short recorded clip (webm/wav/ogg)"),
+    pipeline: EdgeGuardPipeline = Depends(get_pipeline),
+    stt: WhisperSTT = Depends(get_stt),
+) -> VoiceResponse:
+    """Transcribe a browser-uploaded clip with Whisper, then run the pipeline.
+
+    Needs a secure context (https or localhost) for the browser mic. Prefer
+    ``POST /voice/device`` when opening the dashboard over plain LAN HTTP.
+    """
+    raw = await audio.read()
+    filename = audio.filename or "audio.webm"
+    return _voice_from_audio(raw, filename, pipeline, stt)
+
+
+@app.post("/voice/device", response_model=VoiceResponse)
+def run_voice_device(
+    pipeline: EdgeGuardPipeline = Depends(get_pipeline),
+    stt: WhisperSTT = Depends(get_stt),
+    settings: Settings = Depends(get_settings_dep),
+) -> VoiceResponse:
+    """Record from the board's ALSA mic (Brio), transcribe, run the pipeline.
+
+    Works over plain ``http://<board-ip>:8000/`` — no browser microphone /
+    HTTPS / SSH tunnel required.
+    """
+    from edgeguard.stt.device_record import record_wav
+
+    try:
+        raw = record_wav(
+            seconds=settings.stt.record_seconds,
+            alsa_device=settings.stt.alsa_device,
+            sample_rate=settings.stt.sample_rate,
+        )
+    except Exception as e:
+        log.exception("stt.device_record.failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Board mic record failed: {e}",
+        ) from e
+
+    return _voice_from_audio(raw, "device.wav", pipeline, stt)
 
 
 @app.get("/health", response_model=HealthResponse)

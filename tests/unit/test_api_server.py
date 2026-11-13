@@ -155,6 +155,30 @@ async def test_run_voice_rejects_empty_transcript(
     assert "didn't catch" in str(exc_info.value.detail).lower()
 
 
+def test_run_voice_device_records_then_transcribes(
+    pipeline: EdgeGuardPipeline, settings: Settings, mocker
+) -> None:
+    mock_stt = mocker.MagicMock()
+    mock_stt.is_loaded = True
+    mock_stt.transcribe.return_value = ("take a photo", 9.0)
+    server_module._stt = mock_stt
+    server_module._mcu = None
+    mocker.patch(
+        "edgeguard.stt.device_record.record_wav",
+        return_value=b"RIFF" + b"\x00" * 200,
+    )
+    mocker.patch.object(server_module, "get_settings", return_value=settings)
+
+    response = server_module.run_voice_device(
+        pipeline=pipeline, stt=mock_stt, settings=settings
+    )
+
+    assert response.heard == "take a photo"
+    assert response.verdict == Verdict.CLEAN.value
+    mock_stt.transcribe.assert_called_once()
+    assert mock_stt.transcribe.call_args.kwargs["filename"] == "device.wav"
+
+
 def test_dashboard_serves_html() -> None:
     response = server_module.dashboard()
 

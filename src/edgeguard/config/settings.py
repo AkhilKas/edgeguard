@@ -164,6 +164,19 @@ class ActionsSettings(BaseSettings):
         default=Path("/home/arduino/photos"),
         description="Directory where actions.take_photo() saves captured frames",
     )
+    camera_warmup_seconds: float = Field(
+        default=1.5,
+        ge=0.5,
+        le=10.0,
+        description="Keep the USB camera streaming at least this long before "
+        "saving a frame (lets the Brio LED/AE settle)",
+    )
+    camera_discard_frames: int = Field(
+        default=8,
+        ge=0,
+        le=60,
+        description="Drop this many frames during warmup before the kept shot",
+    )
 
 
 class STTSettings(BaseSettings):
@@ -192,6 +205,18 @@ class STTSettings(BaseSettings):
         default="en",
         description="Force language code, or empty to let Whisper detect",
     )
+    record_seconds: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=15.0,
+        description="How long /voice/device records from the board mic",
+    )
+    alsa_device: str = Field(
+        default="default",
+        description="ALSA capture device for arecord (arecord -l to list; "
+        "try plughw:1,0 for a USB Brio)",
+    )
+    sample_rate: int = Field(default=16000, ge=8000, le=48000)
 
 
 class Settings(BaseSettings):

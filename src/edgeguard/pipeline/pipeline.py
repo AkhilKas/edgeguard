@@ -46,11 +46,15 @@ class EdgeGuardPipeline:
         llm: BaseLLM,
         guardrail_enabled: bool = True,
         photo_dir: Path = Path("/home/arduino/photos"),
+        camera_warmup_seconds: float = 1.5,
+        camera_discard_frames: int = 8,
     ) -> None:
         self._classifier = classifier
         self._llm = llm
         self._guardrail_enabled = guardrail_enabled
         self._photo_dir = photo_dir
+        self._camera_warmup_seconds = camera_warmup_seconds
+        self._camera_discard_frames = camera_discard_frames
 
     def run(self, prompt: str) -> PipelineResult:
         t0 = time.perf_counter()
@@ -108,7 +112,11 @@ class EdgeGuardPipeline:
             if wants_photo:
                 from edgeguard.actions import take_photo
 
-                action_note = take_photo(self._photo_dir)
+                action_note = take_photo(
+                    self._photo_dir,
+                    warmup_seconds=self._camera_warmup_seconds,
+                    discard_frames=self._camera_discard_frames,
+                )
                 reply = (
                     f"Captured a photo. {action_note}"
                     if action_note.startswith("Photo saved")

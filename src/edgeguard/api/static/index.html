@@ -163,10 +163,11 @@
 
   <section class="panel">
     <h2>Send a prompt</h2>
-    <textarea id="prompt-input" placeholder="e.g. Turn off the kitchen lights — or use the mic"></textarea>
+    <textarea id="prompt-input" placeholder="e.g. Turn off the kitchen lights — or Listen on device"></textarea>
     <div class="row">
       <button class="primary" id="send-btn">Send</button>
-      <button class="mic" id="mic-btn" type="button">Mic</button>
+      <button class="mic" id="device-mic-btn" type="button">Listen on device</button>
+      <button class="mic" id="mic-btn" type="button" title="Browser mic (needs https or localhost)">Browser mic</button>
       <span class="hint" id="send-hint">Guardrail runs first; the LLM is only called if it passes.</span>
     </div>
     <div id="voice-status" aria-live="polite"></div>
@@ -192,6 +193,7 @@ const healthGrid = document.getElementById("health-grid");
 const refreshBtn = document.getElementById("refresh-health");
 const promptInput = document.getElementById("prompt-input");
 const sendBtn = document.getElementById("send-btn");
+const deviceMicBtn = document.getElementById("device-mic-btn");
 const micBtn = document.getElementById("mic-btn");
 const voiceStatus = document.getElementById("voice-status");
 const errorBox = document.getElementById("error");
@@ -205,6 +207,7 @@ let mediaRecorder = null;
 let mediaStream = null;
 let audioChunks = [];
 let recording = false;
+let deviceListening = false;
 
 function setVoiceStatus(text, kind) {
   voiceStatus.textContent = text || "";
@@ -219,10 +222,14 @@ async function loadHealth() {
     const h = await res.json();
     mcuEnabled = h.mcu_enabled;
     sttReady = !!(h.stt_enabled && h.stt_loaded);
+    deviceMicBtn.disabled = !sttReady;
     micBtn.disabled = !sttReady;
-    micBtn.title = sttReady
-      ? "Click to speak a command, click again to stop"
+    deviceMicBtn.title = sttReady
+      ? "Records from the board mic (Brio) — works over plain http://board-ip"
       : "STT not ready — set STT_ENABLED=true and pip install -e \".[stt]\"";
+    micBtn.title = sttReady
+      ? "Browser mic — needs https or localhost/SSH tunnel"
+      : "STT not ready";
     healthGrid.innerHTML = `
       <div>Status <span>${h.status}</span></div>
       <div>LLM loaded <span>${h.llm_loaded ? "yes" : "no"}</span></div>
@@ -233,6 +240,7 @@ async function loadHealth() {
     `;
   } catch (err) {
     healthGrid.innerHTML = `<div style="color:#cf222e">Could not reach /health: ${err.message}</div>`;
+    deviceMicBtn.disabled = true;
     micBtn.disabled = true;
   }
 }
@@ -419,8 +427,48 @@ function toggleMic() {
   else startHearing();
 }
 
+async function listenOnDevice() {
+  if (!sttReady) {
+    setVoiceStatus("Whisper STT is off on the server. Enable STT_ENABLED and install .[stt].", "error");
+    return;
+  }
+  if (deviceListening) return;
+
+  errorBox.style.display = "none";
+  resultBox.style.display = "none";
+  deviceListening = true;
+  deviceMicBtn.disabled = true;
+  deviceMicBtn.classList.add("hearing");
+  sendBtn.disabled = true;
+  micBtn.disabled = true;
+  setVoiceStatus("Hearing… speak toward the board mic (recording on the UNO Q).", "");
+
+  try {
+    const res = await fetch("/voice/device", { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = body.detail || `HTTP ${res.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    promptInput.value = body.heard;
+    setVoiceStatus(`I heard: “${body.heard}”`, "heard");
+    showPipelineResult(body.heard, body, body.stt_latency_ms);
+  } catch (err) {
+    setVoiceStatus(err.message, "error");
+    errorBox.textContent = err.message;
+    errorBox.style.display = "block";
+  } finally {
+    deviceListening = false;
+    deviceMicBtn.classList.remove("hearing");
+    deviceMicBtn.disabled = !sttReady;
+    micBtn.disabled = !sttReady;
+    sendBtn.disabled = false;
+  }
+}
+
 refreshBtn.addEventListener("click", loadHealth);
 sendBtn.addEventListener("click", sendPrompt);
+deviceMicBtn.addEventListener("click", listenOnDevice);
 micBtn.addEventListener("click", toggleMic);
 promptInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendPrompt();

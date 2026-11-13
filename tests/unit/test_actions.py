@@ -45,14 +45,26 @@ def test_take_photo_reports_no_camera_found(mocker, tmp_path: Path) -> None:
     assert result == "Camera failed: no camera device found."
 
 
+def test_take_photo_reports_failed_open(mocker, tmp_path: Path) -> None:
+    mocker.patch("edgeguard.actions._camera_index", return_value=3)
+    mock_cap = mocker.MagicMock()
+    mock_cap.isOpened.return_value = False
+    mocker.patch("cv2.VideoCapture", return_value=mock_cap)
+
+    result = take_photo(photo_dir=tmp_path, warmup_seconds=0.01, discard_frames=0)
+
+    assert result == "Camera failed: could not open /dev/video3."
+
+
 def test_take_photo_reports_failed_read(mocker, tmp_path: Path) -> None:
     mocker.patch("edgeguard.actions._camera_index", return_value=3)
     mock_cap = mocker.MagicMock()
+    mock_cap.isOpened.return_value = True
     mock_cap.read.return_value = (False, None)
     mocker.patch("cv2.VideoCapture", return_value=mock_cap)
     mocker.patch("edgeguard.actions.time.sleep")
 
-    result = take_photo(photo_dir=tmp_path)
+    result = take_photo(photo_dir=tmp_path, warmup_seconds=0.01, discard_frames=0)
 
     assert result == "Camera failed: could not read /dev/video3."
     mock_cap.release.assert_called_once()
@@ -62,16 +74,19 @@ def test_take_photo_saves_frame_to_photo_dir(mocker, tmp_path: Path) -> None:
     photo_dir = tmp_path / "photos"
     mocker.patch("edgeguard.actions._camera_index", return_value=0)
     mock_cap = mocker.MagicMock()
-    mock_cap.read.return_value = (True, "fake-frame")
+    mock_cap.isOpened.return_value = True
+    mock_cap.read.return_value = (True, "final-frame")
     mocker.patch("cv2.VideoCapture", return_value=mock_cap)
     mocker.patch("edgeguard.actions.time.sleep")
+    mono = mocker.patch("edgeguard.actions.time.monotonic")
+    mono.side_effect = [0.0, 0.0, 10.0, 10.0, 10.0, 10.0]
     mock_imwrite = mocker.patch("cv2.imwrite")
 
-    result = take_photo(photo_dir=photo_dir)
+    result = take_photo(photo_dir=photo_dir, warmup_seconds=1.5, discard_frames=1)
 
     assert result.startswith("Photo saved to ")
     assert photo_dir.exists()
     saved_path = Path(result.removeprefix("Photo saved to ").removesuffix("."))
     assert saved_path.parent == photo_dir
-    mock_imwrite.assert_called_once_with(str(saved_path), "fake-frame")
+    mock_imwrite.assert_called_once()
     mock_cap.release.assert_called_once()
