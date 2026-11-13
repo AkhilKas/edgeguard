@@ -26,6 +26,10 @@ dependencies = [
 [project.optional-dependencies]
 stt = [
     "faster-whisper>=1.0.0",
+    # PyAV 19 removed metadata_errors= from av.open(); faster-whisper 1.2.1
+    # still passes it and crashes every /voice request. Pin until a fixed
+    # faster-whisper release is on PyPI.
+    "av>=11,<19",
 ]
 dev = [
     "pytest>=8.2.0",
