@@ -14,10 +14,12 @@ from typing import Any
 import structlog
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from edgeguard.api.schemas import (
     HealthResponse,
+    PhotoInfo,
+    PhotoListResponse,
     PipelineResponse,
     PromptRequest,
     VoiceResponse,
@@ -95,7 +97,29 @@ def _run_and_notify(prompt: str) -> None:
     _mcu.send_status(result.verdict.value)
 
 
-def _pipeline_response(result: PipelineResult) -> PipelineResponse:
+def _photo_url_for(path: Path | None, photo_dir: Path) -> str | None:
+    if path is None:
+        return None
+    try:
+        resolved = path.resolve()
+        if resolved.parent.resolve() != photo_dir.resolve():
+            return None
+        if resolved.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            return None
+        return f"/photos/{resolved.name}"
+    except OSError:
+        return None
+
+
+def _pipeline_response(
+    result: PipelineResult, photo_dir: Path | None = None
+) -> PipelineResponse:
+    directory = photo_dir
+    if directory is None and _pipeline is not None:
+        directory = _pipeline._photo_dir
+    photo_url = (
+        _photo_url_for(result.photo_path, directory) if directory is not None else None
+    )
     return PipelineResponse(
         verdict=result.verdict.value,
         confidence=result.confidence,
@@ -104,7 +128,22 @@ def _pipeline_response(result: PipelineResult) -> PipelineResponse:
         guardrail_latency_ms=result.guardrail_latency_ms,
         llm_latency_ms=result.llm_latency_ms,
         total_latency_ms=result.total_latency_ms,
+        photo_url=photo_url,
     )
+
+
+def _safe_photo_path(photo_dir: Path, name: str) -> Path:
+    """Resolve a photo filename under photo_dir; reject path traversal."""
+    if not name or name != Path(name).name:
+        raise HTTPException(status_code=400, detail="Invalid photo name")
+    if Path(name).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(status_code=400, detail="Unsupported photo type")
+    path = (photo_dir / name).resolve()
+    if path.parent != photo_dir.resolve():
+        raise HTTPException(status_code=400, detail="Invalid photo name")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return path
 
 
 app = FastAPI(
@@ -202,6 +241,7 @@ def _voice_from_audio(
         guardrail_latency_ms=pipe.guardrail_latency_ms,
         llm_latency_ms=pipe.llm_latency_ms,
         total_latency_ms=pipe.total_latency_ms,
+        photo_url=pipe.photo_url,
     )
 
 
@@ -248,6 +288,48 @@ def run_voice_device(
         ) from e
 
     return _voice_from_audio(raw, "device.wav", pipeline, stt)
+
+
+@app.get("/photos", response_model=PhotoListResponse)
+def list_photos(
+    settings: Settings = Depends(get_settings_dep),
+    limit: int = 24,
+) -> PhotoListResponse:
+    """List recent JPEGs in ACTIONS_PHOTO_DIR for the dashboard gallery."""
+    photo_dir = settings.actions.photo_dir
+    if not photo_dir.exists():
+        return PhotoListResponse(photos=[])
+    limit = max(1, min(limit, 100))
+    files = sorted(
+        [
+            p
+            for p in photo_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )[:limit]
+    photos = [
+        PhotoInfo(
+            name=p.name,
+            url=f"/photos/{p.name}",
+            size_bytes=p.stat().st_size,
+            modified_at=p.stat().st_mtime,
+        )
+        for p in files
+    ]
+    return PhotoListResponse(photos=photos)
+
+
+@app.get("/photos/{name}")
+def get_photo(
+    name: str,
+    settings: Settings = Depends(get_settings_dep),
+) -> FileResponse:
+    """Serve one captured frame so the laptop browser can view it (no scp)."""
+    path = _safe_photo_path(settings.actions.photo_dir, name)
+    media = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media, filename=path.name)
 
 
 @app.get("/health", response_model=HealthResponse)

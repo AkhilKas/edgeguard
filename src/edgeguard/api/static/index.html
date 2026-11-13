@@ -149,6 +149,38 @@
   #history .prompt { color: var(--text); }
   #history .meta { color: var(--muted); margin-top: 2px; }
   #history-empty { color: var(--muted); font-size: 0.85rem; }
+
+  #result-photo, #photo-gallery { margin-top: 12px; }
+  #result-photo { display: none; }
+  #result-photo img, #photo-gallery img {
+    max-width: 100%;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #0d1117;
+  }
+  #photo-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  #photo-gallery a {
+    display: block;
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-decoration: none;
+  }
+  #photo-gallery a:hover { color: var(--text); }
+  #photos-empty { color: var(--muted); font-size: 0.85rem; }
+  #refresh-photos {
+    float: right;
+    font-size: 0.8rem;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -176,9 +208,21 @@
       <div><span class="badge" id="verdict-badge"></span> <span id="confidence"></span></div>
       <div class="meta" id="pattern-line"></div>
       <div class="response" id="llm-response"></div>
+      <div id="result-photo">
+        <a id="result-photo-link" href="#" target="_blank" rel="noopener">
+          <img id="result-photo-img" alt="Captured frame" />
+        </a>
+        <div class="hint">Open the image in a new tab to save it — no scp needed.</div>
+      </div>
       <div class="meta" id="latency-line"></div>
       <div class="hint" id="mcu-note"></div>
     </div>
+  </section>
+
+  <section class="panel">
+    <h2>Photos on device <button id="refresh-photos">Refresh</button></h2>
+    <p id="photos-empty">No photos yet. Ask for a picture (or say “take a photo”).</p>
+    <div id="photo-gallery"></div>
   </section>
 
   <section class="panel">
@@ -198,6 +242,12 @@ const micBtn = document.getElementById("mic-btn");
 const voiceStatus = document.getElementById("voice-status");
 const errorBox = document.getElementById("error");
 const resultBox = document.getElementById("result");
+const resultPhoto = document.getElementById("result-photo");
+const resultPhotoImg = document.getElementById("result-photo-img");
+const resultPhotoLink = document.getElementById("result-photo-link");
+const photoGallery = document.getElementById("photo-gallery");
+const photosEmpty = document.getElementById("photos-empty");
+const refreshPhotosBtn = document.getElementById("refresh-photos");
 const historyList = document.getElementById("history");
 const historyEmpty = document.getElementById("history-empty");
 
@@ -265,6 +315,44 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function showResultPhoto(photoUrl) {
+  if (photoUrl) {
+    const bust = `${photoUrl}?t=${Date.now()}`;
+    resultPhotoImg.src = bust;
+    resultPhotoLink.href = photoUrl;
+    resultPhoto.style.display = "block";
+    loadPhotos();
+  } else {
+    resultPhoto.style.display = "none";
+    resultPhotoImg.removeAttribute("src");
+  }
+}
+
+async function loadPhotos() {
+  try {
+    const res = await fetch("/photos?limit=24");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    photoGallery.innerHTML = "";
+    if (!data.photos || data.photos.length === 0) {
+      photosEmpty.style.display = "block";
+      return;
+    }
+    photosEmpty.style.display = "none";
+    for (const photo of data.photos) {
+      const a = document.createElement("a");
+      a.href = photo.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.innerHTML = `<img src="${photo.url}" alt="${escapeHtml(photo.name)}" loading="lazy" /><div>${escapeHtml(photo.name)}</div>`;
+      photoGallery.appendChild(a);
+    }
+  } catch (err) {
+    photosEmpty.style.display = "block";
+    photosEmpty.textContent = `Could not load photos: ${err.message}`;
+  }
+}
+
 function showPipelineResult(promptText, result, extraLatency) {
   document.getElementById("verdict-badge").textContent = result.verdict;
   document.getElementById("verdict-badge").className = `badge ${result.verdict}`;
@@ -287,6 +375,7 @@ function showPipelineResult(promptText, result, extraLatency) {
     ? "MCU bridge is enabled — check the board's LED for the matching verdict pattern."
     : "MCU bridge is disabled — nothing should happen on the board for this request.";
 
+  showResultPhoto(result.photo_url || null);
   resultBox.style.display = "block";
   addHistoryEntry(promptText, result);
 }
@@ -467,6 +556,7 @@ async function listenOnDevice() {
 }
 
 refreshBtn.addEventListener("click", loadHealth);
+refreshPhotosBtn.addEventListener("click", loadPhotos);
 sendBtn.addEventListener("click", sendPrompt);
 deviceMicBtn.addEventListener("click", listenOnDevice);
 micBtn.addEventListener("click", toggleMic);
@@ -475,6 +565,7 @@ promptInput.addEventListener("keydown", (e) => {
 });
 
 loadHealth();
+loadPhotos();
 </script>
 </body>
 </html>

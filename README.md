@@ -42,6 +42,8 @@ Routes (`src/edgeguard/api/server.py`):
 | `POST` | `/prompt` | Run the full pipeline (`{"text": "..."}`) |
 | `POST` | `/voice` | Upload a browser mic clip → Whisper → pipeline (needs HTTPS/localhost for browser mic) |
 | `POST` | `/voice/device` | Record from board ALSA mic (Brio) → Whisper → pipeline (works over plain `http://board-ip`) |
+| `GET` | `/photos` | List recent JPEGs in `ACTIONS_PHOTO_DIR` |
+| `GET` | `/photos/{name}` | Serve one captured frame in the browser (no scp) |
 | `GET` | `/health` | Status: LLM loaded, guardrail mode, MCU/STT flags, etc. |
 
 If `MCU_ENABLED=true` and the Router Bridge is connected, `/prompt` also

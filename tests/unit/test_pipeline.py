@@ -49,6 +49,7 @@ def test_photo_request_calls_take_photo_with_configured_dir(
     assert result.verdict == Verdict.CLEAN
     assert result.llm_response == "Captured a photo. Photo saved to /x/shot.jpg"
     assert result.llm_latency_ms is not None
+    assert result.photo_path == Path("/x/shot.jpg")
 
 
 def test_photo_request_failure_is_passed_through_as_response(
@@ -67,6 +68,7 @@ def test_photo_request_failure_is_passed_through_as_response(
     result = pipeline.run("take a photo of the room")
 
     assert result.llm_response == "Camera failed: no camera device found."
+    assert result.photo_path is None
 
 
 def test_injected_prompt_never_checks_wants_photo(

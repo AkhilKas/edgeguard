@@ -31,6 +31,7 @@ class PipelineResult:
     guardrail_latency_ms: float
     llm_latency_ms: float | None  # None if blocked
     total_latency_ms: float
+    photo_path: Path | None = None  # set when take_photo saved a JPEG
 
 
 class EdgeGuardPipeline:
@@ -117,11 +118,14 @@ class EdgeGuardPipeline:
                     warmup_seconds=self._camera_warmup_seconds,
                     discard_frames=self._camera_discard_frames,
                 )
-                reply = (
-                    f"Captured a photo. {action_note}"
-                    if action_note.startswith("Photo saved")
-                    else action_note
-                )
+                photo_path: Path | None = None
+                if action_note.startswith("Photo saved to "):
+                    photo_path = Path(
+                        action_note.removeprefix("Photo saved to ").rstrip(".")
+                    )
+                    reply = f"Captured a photo. {action_note}"
+                else:
+                    reply = action_note
                 return PipelineResult(
                     prompt=prompt,
                     verdict=clf_result.verdict,
@@ -131,6 +135,7 @@ class EdgeGuardPipeline:
                     guardrail_latency_ms=guardrail_ms,
                     llm_latency_ms=round(llm_ms, 2),
                     total_latency_ms=(time.perf_counter() - t0) * 1000,
+                    photo_path=photo_path,
                 )
 
         # ── Stage 2: LLM inference ───────────────────────────────────────────

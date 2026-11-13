@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from edgeguard.api import server as server_module
 from edgeguard.api.schemas import PromptRequest
 from edgeguard.config.settings import (
+    ActionsSettings,
     APISettings,
     GuardrailSettings,
     LLMSettings,
@@ -20,7 +21,7 @@ from edgeguard.config.settings import (
     Settings,
 )
 from edgeguard.guardrail.base import Verdict
-from edgeguard.pipeline.pipeline import EdgeGuardPipeline
+from edgeguard.pipeline.pipeline import EdgeGuardPipeline, PipelineResult
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +40,14 @@ def reset_server_globals():
 def settings(tmp_path: Path) -> Settings:
     model_file = tmp_path / "model.gguf"
     model_file.touch()
+    photos = tmp_path / "photos"
+    photos.mkdir()
     return Settings(
         llm=LLMSettings(model_path=model_file),
         guardrail=GuardrailSettings(),
         mcu=MCUSettings(enabled=False),
         api=APISettings(),
+        actions=ActionsSettings(photo_dir=photos),
     )
 
 
@@ -266,3 +270,58 @@ def test_main_runs_uvicorn_with_settings_values(settings: Settings, mocker) -> N
         reload=settings.api.reload,
         log_level=settings.log_level.value.lower(),
     )
+
+
+def test_pipeline_response_includes_photo_url(
+    pipeline: EdgeGuardPipeline, settings: Settings
+) -> None:
+    server_module._pipeline = pipeline
+    pipeline._photo_dir = settings.actions.photo_dir
+    shot = settings.actions.photo_dir / "shot-demo.jpg"
+    shot.write_bytes(b"jpg")
+    result = PipelineResult(
+        prompt="take a photo",
+        verdict=Verdict.CLEAN,
+        confidence=0.05,
+        matched_pattern=None,
+        llm_response="Captured a photo.",
+        guardrail_latency_ms=1.0,
+        llm_latency_ms=2.0,
+        total_latency_ms=3.0,
+        photo_path=shot,
+    )
+
+    response = server_module._pipeline_response(result)
+
+    assert response.photo_url == "/photos/shot-demo.jpg"
+
+
+def test_list_photos_returns_recent_files(settings: Settings) -> None:
+    older = settings.actions.photo_dir / "shot-old.jpg"
+    newer = settings.actions.photo_dir / "shot-new.jpg"
+    older.write_bytes(b"old")
+    newer.write_bytes(b"new")
+    import os
+
+    os.utime(older, (1_000_000, 1_000_000))
+    os.utime(newer, (2_000_000, 2_000_000))
+
+    response = server_module.list_photos(settings=settings, limit=10)
+
+    assert [p.name for p in response.photos] == ["shot-new.jpg", "shot-old.jpg"]
+    assert response.photos[0].url == "/photos/shot-new.jpg"
+
+
+def test_get_photo_serves_file(settings: Settings) -> None:
+    shot = settings.actions.photo_dir / "shot-serve.jpg"
+    shot.write_bytes(b"jpeg-bytes")
+
+    response = server_module.get_photo(name="shot-serve.jpg", settings=settings)
+
+    assert Path(response.path) == shot.resolve()
+
+
+def test_get_photo_rejects_path_traversal(settings: Settings) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.get_photo(name="../etc/passwd", settings=settings)
+    assert exc_info.value.status_code == 400

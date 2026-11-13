@@ -23,6 +23,7 @@ class PipelineResponse(BaseModel):
     guardrail_latency_ms: float
     llm_latency_ms: float | None
     total_latency_ms: float
+    photo_url: str | None = None  # e.g. /photos/shot-….jpg when a frame was saved
 
 
 class HealthResponse(BaseModel):
@@ -48,3 +49,15 @@ class VoiceResponse(BaseModel):
     guardrail_latency_ms: float
     llm_latency_ms: float | None
     total_latency_ms: float
+    photo_url: str | None = None
+
+
+class PhotoInfo(BaseModel):
+    name: str
+    url: str
+    size_bytes: int
+    modified_at: float
+
+
+class PhotoListResponse(BaseModel):
+    photos: list[PhotoInfo]
