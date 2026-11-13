@@ -212,9 +212,10 @@ class STTSettings(BaseSettings):
         description="How long /voice/device records from the board mic",
     )
     alsa_device: str = Field(
-        default="default",
-        description="ALSA capture device for arecord (arecord -l to list; "
-        "try plughw:1,0 for a USB Brio)",
+        default="auto",
+        description="ALSA -D for arecord: auto|plughw:N,M|plug:default. "
+        "'default' often fails on USB cams; auto picks a USB/Brio card from "
+        "`arecord -l`",
     )
     sample_rate: int = Field(default=16000, ge=8000, le=48000)
 
